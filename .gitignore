@@ -1,0 +1,38 @@
+# macOS metadata
+.DS_Store
+*/.DS_Store
+**/.DS_Store
+._*
+
+# Arduino / ESP32 build artifacts
+*.elf
+*.bin
+*.hex
+*.map
+*.eep
+*.uf2
+*.a
+build/
+cmake-build-*/
+
+# PlatformIO cache
+.pio/
+.pioenvs/
+.piolibdeps/
+.clangd/
+.ccls-cache/
+
+# VS Code / IDE files
+.vscode/
+.idea/
+*.code-workspace
+
+# Python / tooling leftovers
+__pycache__/
+*.py[cod]
+
+# Logs and temporary files
+*.log
+*.swp
+*.swo
+*.tmp
