@@ -1,6 +1,7 @@
 #include <lvgl.h>
 #include <Arduino.h>
 #include <ctype.h>
+#include <limits.h>
 #include <string.h>
 
 #include "ui_main.h"
@@ -33,6 +34,8 @@ static lv_obj_t *label_line_unit[3]  = { nullptr, nullptr, nullptr };
 
 static constexpr int32_t DATA_UNAVAILABLE = -11;
 static const char *UNAVAILABLE_TEXT = "-11";
+static constexpr int16_t INV_P_AC_INVALID = INT16_MIN;
+static constexpr uint16_t TIME_INVALID = 0xFFFFU;
 
 // ----------------------------------------------------
 // Helper: stringa stato principale
@@ -139,36 +142,40 @@ void ui_main_update()
   set_icon_visible(icon_stop, stop_visible);
 
   // ---------- Tempo rimanente ----------
-  auto pick_time_s = [&]() -> int32_t {
-    if (!status_valid) return DATA_UNAVAILABLE;
+  // Il tempo ricevuto è in minuti (uint16), 0xFFFF=invalid.
+  auto pick_time_min = [&]() -> uint16_t {
+    if (!status_valid) return TIME_INVALID;
 
-    const bool ttf_valid = s.time_to_full_s >= 0;
-    const bool tte_valid = s.time_to_empty_s >= 0;
+    const bool ttf_valid = s.time_to_full_deci_min  != TIME_INVALID;
+    const bool tte_valid = s.time_to_empty_deci_min != TIME_INVALID;
 
-    if (s.main_state == 3 && ttf_valid) return s.time_to_full_s;
-    if (s.main_state == 4 && tte_valid) return s.time_to_empty_s;
-    if (tte_valid) return s.time_to_empty_s;
-    if (ttf_valid) return s.time_to_full_s;
-    return DATA_UNAVAILABLE;
+    if (s.main_state == 3 && ttf_valid) return s.time_to_full_deci_min;
+    if (s.main_state == 4 && tte_valid) return s.time_to_empty_deci_min;
+    if (tte_valid) return s.time_to_empty_deci_min;
+    if (ttf_valid) return s.time_to_full_deci_min;
+    return TIME_INVALID;
   };
 
-  int32_t time_s = pick_time_s();
+  uint16_t time_min = pick_time_min();
 
   if (label_time_value) {
-    if (time_s < 0) {
+    if (time_min == TIME_INVALID) {
       lv_label_set_text(label_time_value, UNAVAILABLE_TEXT);
     } else {
-      char buf[16];
-      uint32_t total_sec = static_cast<uint32_t>(time_s);
-      uint32_t minutes = total_sec / 60U;
-      uint32_t seconds = total_sec % 60U;
-      snprintf(buf, sizeof(buf), "%u%02u", (unsigned)minutes, (unsigned)seconds);
-      lv_label_set_text(label_time_value, buf);
+      if (time_min > (16U * 60U)) {
+        lv_label_set_text(label_time_value, ">16h");
+      } else {
+        char buf[16];
+        uint16_t hours = static_cast<uint16_t>(time_min / 60U);
+        uint16_t mins  = static_cast<uint16_t>(time_min % 60U);
+        snprintf(buf, sizeof(buf), "%02u:%02u", (unsigned)hours, (unsigned)mins);
+        lv_label_set_text(label_time_value, buf);
+      }
     }
   }
 
   if (label_time_unit) {
-    lv_label_set_text(label_time_unit, "min");
+    lv_label_set_text(label_time_unit, "");
   }
 
   // ---------- Linee inferiori (placeholder: valori attuali) ----------
@@ -184,8 +191,8 @@ void ui_main_update()
   };
 
   for (int i = 0; i < 3; ++i) {
-    bool valid = status2_valid && s.inv_p_ac_w[i] != DATA_UNAVAILABLE;
-    set_line_value(i, valid, s.inv_p_ac_w[i]);
+    bool valid = status2_valid && s.inv_p_ac_deci_kw[i] != INV_P_AC_INVALID;
+    set_line_value(i, valid, s.inv_p_ac_deci_kw[i]);
   }
 
   for (int i = 0; i < 3; ++i) {

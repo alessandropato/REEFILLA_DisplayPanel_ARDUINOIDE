@@ -8,8 +8,8 @@
 // ========================= VCU_Display_Status (0x1088A0F1) =========================
 // B0   : SOC_TOT [% 0..100, 0xFF=invalid]
 // B1   : SOC_ACTIVE [% 0..100, 0xFF=invalid]
-// B2-3 : TimeToFull  [0.1 min, uint16]
-// B4-5 : TimeToEmpty [0.1 min, uint16]
+// B2-3 : TimeToFull  [min, uint16]
+// B4-5 : TimeToEmpty [min, uint16]
 // B6   : MainStateMachineState (enum)
 // B7   : Reserved
 static const uint32_t DBC_ID_VCU_DISPLAY_STATUS   = 0x1088A0F1UL;
@@ -57,33 +57,26 @@ static void decode_vcu_display_status(const CanFrame &frame)
                           : static_cast<int16_t>(raw);
   };
 
-  auto decode_time_s = [](uint16_t raw) -> int32_t {
-    if (raw == 0xFFFFU) {
-      return DBC_NO_DATA;
-    }
-    // 0.1 min -> 6 seconds
-    return static_cast<int32_t>(raw) * 6;
-  };
-
   g_dbc_state.soc_tot_percent    = decode_percent(d[0]);
   g_dbc_state.soc_active_percent = decode_percent(d[1]);
   uint16_t raw_ttf = read_le_u16(&d[2]);
   uint16_t raw_tte = read_le_u16(&d[4]);
   uint8_t raw_state = d[6];
 
-  g_dbc_state.time_to_full_s  = decode_time_s(raw_ttf);
-  g_dbc_state.time_to_empty_s = decode_time_s(raw_tte);
+  // Salva i tempi come ricevuti (min)
+  g_dbc_state.time_to_full_deci_min  = raw_ttf;
+  g_dbc_state.time_to_empty_deci_min = raw_tte;
   g_dbc_state.main_state      = (raw_state == 0xFFU)
                                    ? static_cast<int16_t>(DBC_NO_DATA)
                                    : static_cast<int16_t>(raw_state);
   g_dbc_state.status_lastUpdate_ms = frame.timestamp_ms;
 
   Serial.printf(
-      "[DBC] Status: SOC_TOT=%d%%, SOC_ACTIVE=%d%%, TTF=%.1f min, TTE=%.1f min, STATE=%d\n",
+      "[DBC] Status: SOC_TOT=%d%%, SOC_ACTIVE=%d%%, TimeToFull(raw min)=%u, TimeToEmpty(raw min)=%u, STATE=%d\n",
       (int)g_dbc_state.soc_tot_percent,
       (int)g_dbc_state.soc_active_percent,
-      (g_dbc_state.time_to_full_s > 0) ? (g_dbc_state.time_to_full_s / 60.0f) : -1.0f,
-      (g_dbc_state.time_to_empty_s > 0) ? (g_dbc_state.time_to_empty_s / 60.0f) : -1.0f,
+      (unsigned)g_dbc_state.time_to_full_deci_min,
+      (unsigned)g_dbc_state.time_to_empty_deci_min,
       (int)g_dbc_state.main_state
   );
 }
@@ -103,19 +96,20 @@ static void decode_vcu_display_status2(const CanFrame &frame)
   for (int i = 0; i < 3; ++i) {
     int16_t raw_deci_kw = read_le_i16(&d[i * 2]);
     if (raw_deci_kw == INT16_MIN) {
-      g_dbc_state.inv_p_ac_w[i] = DBC_NO_DATA;
+      g_dbc_state.inv_p_ac_deci_kw[i] = INT16_MIN;
     } else {
-      g_dbc_state.inv_p_ac_w[i] = static_cast<int32_t>(raw_deci_kw) * 100; // 0.1 kW -> W
+      // Salva il valore come ricevuto (0.1 kW)
+      g_dbc_state.inv_p_ac_deci_kw[i] = raw_deci_kw;
     }
   }
 
   g_dbc_state.status2_lastUpdate_ms = frame.timestamp_ms;
 
   Serial.printf(
-      "[DBC] Status2: P_AC = [%.1f, %.1f, %.1f] kW\n",
-      g_dbc_state.inv_p_ac_w[0] / 1000.0f,
-      g_dbc_state.inv_p_ac_w[1] / 1000.0f,
-      g_dbc_state.inv_p_ac_w[2] / 1000.0f
+      "[DBC] Status2: INV_P_AC_VECT(raw 0.1kW) = [%d, %d, %d]\n",
+      (int)g_dbc_state.inv_p_ac_deci_kw[0],
+      (int)g_dbc_state.inv_p_ac_deci_kw[1],
+      (int)g_dbc_state.inv_p_ac_deci_kw[2]
   );
 }
 
