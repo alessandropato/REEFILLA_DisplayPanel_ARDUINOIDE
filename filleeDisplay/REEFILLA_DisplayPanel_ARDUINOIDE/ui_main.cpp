@@ -44,13 +44,14 @@ static const char *state_to_str(int16_t state)
 {
   switch (state)
   {
-    case 0: return "TURN ON";
-    case 1: return "WAKE BMS";
-    case 2: return "RECOVERY";
-    case 3: return "RUN CHARGE";
-    case 4: return "RUN DISCH";
-    case 5: return "RUN STBY";
-    case 6: return "ERROR";
+    case 0:  return "TURN ON";
+    case 1:  return "WAKE BMS";
+    case 2:  return "RECOVERY";
+    case 3:  return "RUN CHARGE";
+    case 4:  return "RUN DISCH";
+    case 5:  return "RUN STBY";
+    case 6:  return "RUN DISCH OG";
+    case 99: return "ERROR";
     default: return "UNKNOWN";
   }
 }
@@ -136,7 +137,7 @@ void ui_main_update()
   };
 
   const bool warn_visible = status_valid && (s.main_state == 2);
-  const bool stop_visible = status_valid && (s.main_state == 6);
+  const bool stop_visible = status_valid && (s.main_state == 99);
 
   set_icon_visible(icon_warn, warn_visible);
   set_icon_visible(icon_stop, stop_visible);
@@ -150,7 +151,7 @@ void ui_main_update()
     const bool tte_valid = s.time_to_empty_deci_min != TIME_INVALID;
 
     if (s.main_state == 3 && ttf_valid) return s.time_to_full_deci_min;
-    if (s.main_state == 4 && tte_valid) return s.time_to_empty_deci_min;
+    if ((s.main_state == 4 || s.main_state == 6) && tte_valid) return s.time_to_empty_deci_min;
     if (tte_valid) return s.time_to_empty_deci_min;
     if (ttf_valid) return s.time_to_full_deci_min;
     return TIME_INVALID;
