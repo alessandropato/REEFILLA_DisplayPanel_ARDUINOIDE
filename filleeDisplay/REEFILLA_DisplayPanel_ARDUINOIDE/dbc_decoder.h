@@ -2,31 +2,37 @@
 
 #include <Arduino.h>
 #include <limits.h>
-#include "can_port.h"   // per la struct CanFrame
+#include "can_port.h"
 
-// Stato globale decodificato dal "DBC"
 struct DbcState
 {
-  // ================== VCU_Display_Status (0x1088A0F1) ==================
-  int16_t  soc_tot_percent       = -11; // SOC_TOT [%]
-  int16_t  soc_active_percent    = -11; // SOC_ACTIVE [%]
-  // TimeToFull/Empty come ricevuti (min, uint16), 0xFFFF=invalid
-  uint16_t time_to_full_deci_min  = 0xFFFFU;
-  uint16_t time_to_empty_deci_min = 0xFFFFU;
-  int16_t  main_state            = -11; // Main state machine enum
-  uint32_t status_lastUpdate_ms  = 0;   // millis ultima ricezione valida
+  // ================== VCU_DISPLAY_STATUS_MSG1 (0x1088A0F1) ==================
+  int16_t  batt_soc_tot          = -1;      // BATT_SOC_TOT   [%], -1 = non ricevuto
+  int16_t  batt_soc_active       = -1;      // BATT_SOC_ACTIVE [%], -1 = non ricevuto
+  uint16_t time_to_full_min      = 0;       // TIME_TO_FULL  [min], 0 = non calcolabile
+  uint16_t time_to_empty_min     = 0;       // TIME_TO_EMPTY [min], 0 = non calcolabile
+  int16_t  main_state            = -1;      // MAIN_STATE enum (vedi sotto), -1 = non ricevuto
+  uint32_t status_lastUpdate_ms  = 0;
 
-  // ================== VCU_Display_Status_2 (0x1088A1F1) ==================
-  // INV_P_AC_VECT[*] come ricevuto (unità DBC: 0.1 kW, int16)
-  // Nota: usiamo INT16_MIN come "invalid" (come da DBC), per non collidere con valori negativi leciti.
-  int16_t  inv_p_ac_deci_kw[3]   = { INT16_MIN, INT16_MIN, INT16_MIN };
-  uint32_t status2_lastUpdate_ms = 0;   // millis ultima ricezione valida
+  // ================== VCU_DISPLAY_STATUS_MSG2 (0x1088A1F1) ==================
+  int16_t  inv_p_ac_w[3]         = {0, 0, 0}; // INV_P_AC [W], valido per i < inv_count
+  uint8_t  inv_count             = 0;          // INV_COUNT: inverter validi (0–3)
+  uint32_t status2_lastUpdate_ms = 0;
+
+  // ================== VCU_DISPLAY_STATUS_MSG3 (0x1088A2F1) ==================
+  uint8_t  wifi_ip[4]            = {0, 0, 0, 0}; // IP address; tutti 0x00 = WiFi non connesso
+  uint32_t status3_lastUpdate_ms = 0;
 };
 
-// Gestisce un frame CAN secondo il nostro "DBC"
-// - se il messaggio è riconosciuto, lo decodifica, aggiorna lo stato e stampa sulla seriale
-// - se non è riconosciuto, lo ignora (silenzio)
-void dbc_handle_frame(const CanFrame &frame);
+// MAIN_STATE:
+//  0  INIT
+//  1  ALIGN
+//  2  RUN_STANDBY
+//  3  RUN_CHARGING
+//  4  RUN_DISCHARGING
+//  5  RUN_DISCHARGING_ONGRID
+// 90  WARNING
+// 99  ERROR
 
-// Accesso in sola lettura allo stato decodificato
+void dbc_handle_frame(const CanFrame &frame);
 const DbcState &dbc_get_state();

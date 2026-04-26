@@ -5,443 +5,437 @@
 #include <string.h>
 
 #include "ui_main.h"
-#include "dbc_decoder.h"   // per dbc_get_state()
+#include "dbc_decoder.h"
 
-// -----------------------
-// Oggetti LVGL
-// -----------------------
+// ── Palette ────────────────────────────────────────────────────────────────
+#define CLR_BG          0x0A0F1A
+#define CLR_ACCENT      0x22C5C8  // oklch(0.75 0.18 193) ≈ teal
+#define CLR_TRACK       0x1C212C  // rgba(255,255,255,0.07) on BG
+#define CLR_BORDER      0x14181F  // rgba(255,255,255,0.05) on BG
+#define CLR_DIVIDER     0x1A2030  // rgba(255,255,255,0.08) on BG
+#define CLR_GREEN       0x4ADE80  // oklch(0.75 0.2 145)
+#define CLR_YELLOW      0xF0B429  // oklch(0.78 0.18 60)
+#define CLR_RED         0xEF4444  // oklch(0.65 0.22 25)
+#define CLR_TEAL        0x22D3EE  // discharging teal
+#define CLR_WHITE_88    0xE0E0E0  // rgba(255,255,255,0.88)
+#define CLR_TEXT_DIM    0x636873  // rgba(255,255,255,0.35)
+#define CLR_TEXT_VDIM   0x3D424D  // rgba(255,255,255,0.20)
+#define CLR_WARM        0xC4A460  // oklch(0.75 0.12 60) — temperature
 
-// SoC gauge
-static lv_obj_t *soc_arc_bg        = nullptr;
-static lv_obj_t *soc_arc_fg        = nullptr;
-static lv_obj_t *label_soc_value   = nullptr;
-static lv_obj_t *label_soc_percent = nullptr;
-static lv_obj_t *label_soc_state   = nullptr;
+// ── LVGL objects ───────────────────────────────────────────────────────────
 
-// Time remaining
-static lv_obj_t *label_time_title = nullptr;
-static lv_obj_t *label_time_value = nullptr;
-static lv_obj_t *label_time_unit  = nullptr;
+// Top bar
+static lv_obj_t *label_brand        = nullptr;
+static lv_obj_t *label_auto_title   = nullptr;
+static lv_obj_t *label_time_value   = nullptr;
+static lv_obj_t *dot_status         = nullptr;
+static lv_obj_t *label_status_text  = nullptr;
 
-// Icone stato (placeholder)
-static lv_obj_t *icon_warn = nullptr;
-static lv_obj_t *icon_stop = nullptr;
+// Arc gauge
+static lv_obj_t *soc_arc_bg         = nullptr;
+static lv_obj_t *soc_arc_fg         = nullptr;
 
-// Line info (3 colonne in basso)
-static lv_obj_t *label_line_name[3]  = { nullptr, nullptr, nullptr };
-static lv_obj_t *label_line_value[3] = { nullptr, nullptr, nullptr };
-static lv_obj_t *label_line_unit[3]  = { nullptr, nullptr, nullptr };
+// Center text
+static lv_obj_t *label_soc_value    = nullptr;
+static lv_obj_t *label_soc_sub      = nullptr;  // "PERCENTUALE"
 
-static constexpr int32_t DATA_UNAVAILABLE = -11;
-static const char *UNAVAILABLE_TEXT = "-11";
-static constexpr int16_t INV_P_AC_INVALID = INT16_MIN;
-static constexpr uint16_t TIME_INVALID = 0xFFFFU;
+// Arc edge labels
+static lv_obj_t *label_arc_start    = nullptr;  // "0%"
+static lv_obj_t *label_arc_end      = nullptr;  // "100%"
 
-// ----------------------------------------------------
-// Helper: stringa stato principale
-// ----------------------------------------------------
-static const char *state_to_str(int16_t state)
+// Power lines (3 columns)
+static lv_obj_t *label_line_title[3] = {};
+static lv_obj_t *label_line_value[3] = {};
+static lv_obj_t *label_line_unit[3]  = {};
+static lv_obj_t *col_obj[3]          = {};   // column containers (for show/hide)
+static lv_obj_t *vsep_obj[2]         = {};   // vertical separators between columns
+
+// Bottom bar
+static lv_obj_t *label_wifi          = nullptr;
+
+// ── Sentinel values ─────────────────────────────────────────────────────────
+static constexpr uint16_t TIME_INVALID = 0;   // 0 = non calcolabile (spec DBC)
+static const char        *DASHES       = "---";
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
+
+static lv_color_t soc_color(uint8_t pct)
 {
-  switch (state)
-  {
-    case 0:  return "TURN ON";
-    case 1:  return "WAKE BMS";
-    case 2:  return "RECOVERY";
-    case 3:  return "RUN CHARGE";
-    case 4:  return "RUN DISCH";
-    case 5:  return "RUN STBY";
-    case 6:  return "RUN DISCH OG";
-    case 99: return "ERROR";
-    default: return "UNKNOWN";
-  }
+    if (pct > 60) return lv_color_hex(CLR_GREEN);
+    if (pct > 25) return lv_color_hex(CLR_YELLOW);
+    return lv_color_hex(CLR_RED);
 }
 
-// ----------------------------------------------------
-// FUNZIONE PUBBLICA: aggiorna la UI dai dati DBC
-// ----------------------------------------------------
+struct StatusInfo { lv_color_t color; const char *label; };
+static StatusInfo state_info(int16_t state)
+{
+    switch (state) {
+        case 0:  return { lv_color_hex(CLR_TEXT_DIM), "INIT"     };
+        case 1:  return { lv_color_hex(CLR_TEXT_DIM), "ALIGN"    };
+        case 2:  return { lv_color_hex(CLR_TEAL),     "STANDBY"  };
+        case 3:  return { lv_color_hex(CLR_GREEN),    "CARICA"   };
+        case 4:  return { lv_color_hex(CLR_TEAL),     "SCARICA"  };
+        case 5:  return { lv_color_hex(CLR_TEAL),     "SCARICA ON-GRID" };
+        case 90: return { lv_color_hex(CLR_YELLOW),   "WARNING"  };
+        case 99: return { lv_color_hex(CLR_RED),      "ERRORE"   };
+        default: return { lv_color_hex(CLR_TEXT_DIM), "---"      };
+    }
+}
+
+static uint16_t pick_time_min(const DbcState &s, bool status_valid)
+{
+    if (!status_valid) return TIME_INVALID;
+    const bool ttf = s.time_to_full_min  != 0;
+    const bool tte = s.time_to_empty_min != 0;
+    if (s.main_state == 3 && ttf) return s.time_to_full_min;   // RUN_CHARGING
+    if ((s.main_state == 4 || s.main_state == 5) && tte) return s.time_to_empty_min; // RUN_DISCHARGING / ONGRID
+    if (tte) return s.time_to_empty_min;
+    if (ttf) return s.time_to_full_min;
+    return TIME_INVALID;
+}
+
+// ── Update ───────────────────────────────────────────────────────────────────
+
 void ui_main_update()
 {
-  const DbcState &s = dbc_get_state();
-  const bool status_valid  = s.status_lastUpdate_ms  != 0;
-  const bool status2_valid = s.status2_lastUpdate_ms != 0;
+    const DbcState &s = dbc_get_state();
+    const bool status_valid  = s.status_lastUpdate_ms  != 0;
+    const bool status2_valid = s.status2_lastUpdate_ms != 0;
 
-  // ---------- SOC centrale ----------
-  auto clamp_soc = [](int16_t value) -> uint8_t {
-    if (value < 0) return 0;
-    if (value > 100) return 100;
-    return static_cast<uint8_t>(value);
-  };
-
-  // Usa sempre SOC_ACTIVE come valore principale.
-  const bool soc_active_valid = status_valid && s.soc_active_percent >= 0;
-  const bool soc_valid = soc_active_valid;
-
-  uint8_t soc = 0;
-  if (soc_active_valid) {
-    soc = clamp_soc(s.soc_active_percent);
-  }
-
-  lv_color_t accent_col;
-  if (!soc_valid) {
-    accent_col = lv_palette_main(LV_PALETTE_BLUE);
-  } else if (soc < 10) {
-    accent_col = lv_palette_main(LV_PALETTE_RED);
-  } else if (soc < 40) {
-    accent_col = lv_palette_main(LV_PALETTE_YELLOW);
-  } else {
-    accent_col = lv_palette_main(LV_PALETTE_BLUE);
-  }
-
-  if (soc_arc_fg) {
-    lv_arc_set_value(soc_arc_fg, soc);
-    lv_obj_set_style_arc_color(soc_arc_fg, accent_col, LV_PART_INDICATOR);
-  }
-
-  if (label_soc_value) {
-    if (!soc_valid) {
-      lv_label_set_text(label_soc_value, UNAVAILABLE_TEXT);
-    } else {
-      char buf[16];
-      snprintf(buf, sizeof(buf), "%u", static_cast<unsigned>(soc));
-      lv_label_set_text(label_soc_value, buf);
+    // ── SOC ──
+    uint8_t soc = 0;
+    bool soc_valid = status_valid && s.batt_soc_active >= 0;
+    if (soc_valid) {
+        int16_t v = s.batt_soc_active;
+        soc = (uint8_t)(v < 0 ? 0 : v > 100 ? 100 : v);
     }
-  }
 
-  if (label_soc_percent) {
-    lv_label_set_text(label_soc_percent, "%");
-  }
+    lv_color_t arc_col = soc_valid ? soc_color(soc) : lv_color_hex(CLR_ACCENT);
 
-  if (label_soc_state) {
-    if (!status_valid || s.main_state < 0) {
-      lv_label_set_text(label_soc_state, UNAVAILABLE_TEXT);
-    } else {
-      const char *mode = state_to_str(s.main_state);
-      char buf[32];
-      size_t len = strlen(mode);
-      if (len >= sizeof(buf)) len = sizeof(buf) - 1;
-      for (size_t i = 0; i < len; ++i) {
-        buf[i] = toupper((unsigned char)mode[i]);
-      }
-      buf[len] = '\0';
-      lv_label_set_text(label_soc_state, buf);
+    if (soc_arc_fg) {
+        lv_arc_set_value(soc_arc_fg, soc_valid ? soc : 0);
+        lv_obj_set_style_arc_color(soc_arc_fg, arc_col, LV_PART_INDICATOR);
     }
-  }
 
-  auto set_icon_visible = [](lv_obj_t *obj, bool visible) {
-    if (!obj) return;
-    if (visible) {
-      lv_obj_clear_flag(obj, LV_OBJ_FLAG_HIDDEN);
-    } else {
-      lv_obj_add_flag(obj, LV_OBJ_FLAG_HIDDEN);
+    if (label_soc_value) {
+        if (!soc_valid) {
+            lv_label_set_text(label_soc_value, DASHES);
+        } else {
+            char buf[8];
+            snprintf(buf, sizeof(buf), "%u", (unsigned)soc);
+            lv_label_set_text(label_soc_value, buf);
+        }
+        lv_obj_set_style_text_color(label_soc_value, arc_col, 0);
     }
-  };
 
-  const bool warn_visible = status_valid && (s.main_state == 2);
-  const bool stop_visible = status_valid && (s.main_state == 99);
-
-  set_icon_visible(icon_warn, warn_visible);
-  set_icon_visible(icon_stop, stop_visible);
-
-  // ---------- Tempo rimanente ----------
-  // Il tempo ricevuto è in minuti (uint16), 0xFFFF=invalid.
-  auto pick_time_min = [&]() -> uint16_t {
-    if (!status_valid) return TIME_INVALID;
-
-    const bool ttf_valid = s.time_to_full_deci_min  != TIME_INVALID;
-    const bool tte_valid = s.time_to_empty_deci_min != TIME_INVALID;
-
-    if (s.main_state == 3 && ttf_valid) return s.time_to_full_deci_min;
-    if ((s.main_state == 4 || s.main_state == 6) && tte_valid) return s.time_to_empty_deci_min;
-    if (tte_valid) return s.time_to_empty_deci_min;
-    if (ttf_valid) return s.time_to_full_deci_min;
-    return TIME_INVALID;
-  };
-
-  uint16_t time_min = pick_time_min();
-
-  if (label_time_value) {
-    if (time_min == TIME_INVALID) {
-      lv_label_set_text(label_time_value, UNAVAILABLE_TEXT);
+    // ── Status dot + label ──
+    if (status_valid && s.main_state >= 0) {
+        StatusInfo si = state_info(s.main_state);
+        if (dot_status)        lv_obj_set_style_bg_color(dot_status, si.color, 0);
+        if (label_status_text) {
+            lv_label_set_text(label_status_text, si.label);
+            lv_obj_set_style_text_color(label_status_text, si.color, 0);
+        }
     } else {
-      if (time_min > (16U * 60U)) {
-        lv_label_set_text(label_time_value, ">16h");
-      } else {
+        if (dot_status)        lv_obj_set_style_bg_color(dot_status, lv_color_hex(CLR_TEXT_DIM), 0);
+        if (label_status_text) lv_label_set_text(label_status_text, DASHES);
+    }
+
+    // ── Time remaining ──
+    uint16_t time_min = pick_time_min(s, status_valid);
+    if (label_time_value) {
+        if (time_min == TIME_INVALID) {
+            lv_label_set_text(label_time_value, DASHES);
+        } else if (time_min > (16U * 60U)) {
+            lv_label_set_text(label_time_value, ">16h");
+        } else {
+            char buf[16];
+            uint16_t h = time_min / 60U;
+            uint16_t m = time_min % 60U;
+            if (h > 0) snprintf(buf, sizeof(buf), "%uh %02um", (unsigned)h, (unsigned)m);
+            else       snprintf(buf, sizeof(buf), "%um", (unsigned)m);
+            lv_label_set_text(label_time_value, buf);
+        }
+    }
+
+    // ── Power lines ──
+    // Determina quali colonne hanno dati validi: solo i < inv_count
+    bool col_valid[3];
+    for (int i = 0; i < 3; ++i)
+        col_valid[i] = status2_valid && i < s.inv_count;
+
+    // Mostra/nascondi colonne — LVGL flex salta gli oggetti hidden
+    for (int i = 0; i < 3; ++i) {
+        if (!col_obj[i]) continue;
+        if (col_valid[i]) lv_obj_clear_flag(col_obj[i], LV_OBJ_FLAG_HIDDEN);
+        else              lv_obj_add_flag  (col_obj[i], LV_OBJ_FLAG_HIDDEN);
+    }
+
+    // Separatore 0 (tra col 0 e col 1): visibile solo se entrambe presenti
+    if (vsep_obj[0]) {
+        if (col_valid[0] && col_valid[1]) lv_obj_clear_flag(vsep_obj[0], LV_OBJ_FLAG_HIDDEN);
+        else                              lv_obj_add_flag  (vsep_obj[0], LV_OBJ_FLAG_HIDDEN);
+    }
+    // Separatore 1 (tra col 1 e col 2): visibile se col 2 ha dati e c'è almeno una colonna a sinistra
+    if (vsep_obj[1]) {
+        if (col_valid[2] && (col_valid[0] || col_valid[1])) lv_obj_clear_flag(vsep_obj[1], LV_OBJ_FLAG_HIDDEN);
+        else                                                 lv_obj_add_flag  (vsep_obj[1], LV_OBJ_FLAG_HIDDEN);
+    }
+
+    // Aggiorna valori nelle colonne
+    for (int i = 0; i < 3; ++i) {
+        if (!label_line_value[i]) continue;
+        if (!col_valid[i]) continue;
+        int32_t val = s.inv_p_ac_w[i];
         char buf[16];
-        uint16_t hours = static_cast<uint16_t>(time_min / 60U);
-        uint16_t mins  = static_cast<uint16_t>(time_min % 60U);
-        snprintf(buf, sizeof(buf), "%02u:%02u", (unsigned)hours, (unsigned)mins);
-        lv_label_set_text(label_time_value, buf);
-      }
+        if (val >= 0) snprintf(buf, sizeof(buf), "+%ld", (long)val);
+        else          snprintf(buf, sizeof(buf), "%ld",  (long)val);
+        lv_label_set_text(label_line_value[i], buf);
+        lv_obj_set_style_text_color(
+            label_line_value[i],
+            val < 0 ? lv_color_hex(CLR_TEAL) : lv_color_hex(CLR_GREEN),
+            0);
     }
-  }
 
-  if (label_time_unit) {
-    lv_label_set_text(label_time_unit, "");
-  }
-
-  // ---------- Linee inferiori (placeholder: valori attuali) ----------
-  auto set_line_value = [&](int idx, bool valid, int32_t value) {
-    if (!label_line_value[idx]) return;
-    if (!valid) {
-      lv_label_set_text(label_line_value[idx], UNAVAILABLE_TEXT);
-      return;
+    // ── WiFi / IP ──
+    if (label_wifi) {
+        const bool msg3_received = s.status3_lastUpdate_ms != 0;
+        if (!msg3_received) {
+            lv_label_set_text(label_wifi, "WiFi: ---");
+            lv_obj_set_style_text_color(label_wifi, lv_color_hex(CLR_TEXT_VDIM), 0);
+        } else {
+            const uint8_t *ip = s.wifi_ip;
+            const bool connected = ip[0] || ip[1] || ip[2] || ip[3];
+            if (!connected) {
+                lv_label_set_text(label_wifi, "WiFi: non connesso");
+                lv_obj_set_style_text_color(label_wifi, lv_color_hex(CLR_TEXT_DIM), 0);
+            } else {
+                char buf[40];
+                snprintf(buf, sizeof(buf), "Connesso al WiFi  |  %u.%u.%u.%u",
+                         (unsigned)ip[0], (unsigned)ip[1],
+                         (unsigned)ip[2], (unsigned)ip[3]);
+                lv_label_set_text(label_wifi, buf);
+                lv_obj_set_style_text_color(label_wifi, lv_color_hex(CLR_ACCENT), 0);
+            }
+        }
     }
-    char buf[16];
-    snprintf(buf, sizeof(buf), "%d", value);
-    lv_label_set_text(label_line_value[idx], buf);
-  };
-
-  for (int i = 0; i < 3; ++i) {
-    bool valid = status2_valid && s.inv_p_ac_deci_kw[i] != INV_P_AC_INVALID;
-    set_line_value(i, valid, s.inv_p_ac_deci_kw[i]);
-  }
-
-  for (int i = 0; i < 3; ++i) {
-    if (label_line_unit[i]) {
-      lv_label_set_text(label_line_unit[i], "W");
-    }
-  }
 }
 
-// ----------------------------------------------------
-// Inizializzazione UI principale
-// ----------------------------------------------------
+// ── Init helpers ─────────────────────────────────────────────────────────────
+
+static lv_obj_t *make_label(lv_obj_t *parent,
+                             const char *text,
+                             const lv_font_t *font,
+                             lv_color_t color,
+                             lv_text_align_t align = LV_TEXT_ALIGN_LEFT)
+{
+    lv_obj_t *lbl = lv_label_create(parent);
+    lv_label_set_text(lbl, text);
+    lv_obj_set_style_text_font(lbl, font, 0);
+    lv_obj_set_style_text_color(lbl, color, 0);
+    lv_obj_set_style_text_align(lbl, align, 0);
+    return lbl;
+}
+
+// ── Init ─────────────────────────────────────────────────────────────────────
+
 void ui_main_init()
 {
-  Serial.println("[ui_main] Creo UI principale stile single-panel");
+    Serial.println("[ui_main] Nuova UI REEFILLA Dashboard");
 
-  lv_obj_t *scr = lv_scr_act();
+    lv_obj_t *scr = lv_scr_act();
+    lv_obj_set_style_bg_color(scr, lv_color_hex(CLR_BG), 0);
+    lv_obj_set_style_bg_opa(scr, LV_OPA_COVER, 0);
 
-  // Sfondo teal Pantone 326C
-  lv_obj_set_style_bg_color(scr, lv_color_hex(0x00B2A9), 0);
-  lv_obj_set_style_bg_opa(scr, LV_OPA_COVER, 0);
+    lv_color_t col_accent  = lv_color_hex(CLR_ACCENT);
+    lv_color_t col_white88 = lv_color_hex(CLR_WHITE_88);
+    lv_color_t col_dim     = lv_color_hex(CLR_TEXT_DIM);
+    lv_color_t col_vdim    = lv_color_hex(CLR_TEXT_VDIM);
 
-  // --------- Container scrollabile solo orizzontalmente ---------
-  lv_obj_t *pages = lv_obj_create(scr);
-  lv_obj_remove_style_all(pages);
-  lv_obj_set_size(pages, lv_pct(100), lv_pct(100));
-  lv_obj_center(pages);
-  lv_obj_set_scroll_dir(pages, LV_DIR_HOR);
-  lv_obj_set_scroll_snap_x(pages, LV_SCROLL_SNAP_CENTER);
-  lv_obj_set_scrollbar_mode(pages, LV_SCROLLBAR_MODE_OFF);
-  lv_obj_clear_flag(pages, LV_OBJ_FLAG_SCROLL_ELASTIC);
-  lv_obj_set_flex_flow(pages, LV_FLEX_FLOW_ROW);
-  lv_obj_set_flex_align(pages,
-                        LV_FLEX_ALIGN_START,
-                        LV_FLEX_ALIGN_CENTER,
-                        LV_FLEX_ALIGN_CENTER);
-  lv_obj_set_style_pad_column(pages, 0, 0);
+    // ── TOP BAR ─────────────────────────────────────────────────────────────
+    // height=58, bottom border
+    lv_obj_t *top_bar = lv_obj_create(scr);
+    lv_obj_remove_style_all(top_bar);
+    lv_obj_set_size(top_bar, 480, 58);
+    lv_obj_align(top_bar, LV_ALIGN_TOP_MID, 0, 0);
+    lv_obj_set_style_border_width(top_bar, 1, 0);
+    lv_obj_set_style_border_color(top_bar, lv_color_hex(CLR_BORDER), 0);
+    lv_obj_set_style_border_side(top_bar, LV_BORDER_SIDE_BOTTOM, 0);
+    lv_obj_set_style_bg_opa(top_bar, LV_OPA_TRANSP, 0);
+    lv_obj_set_scroll_dir(top_bar, LV_DIR_NONE);
 
-  lv_obj_t *page_main = lv_obj_create(pages);
-  lv_obj_remove_style_all(page_main);
-  lv_obj_set_size(page_main, lv_pct(100), lv_pct(100));
-  lv_obj_set_style_bg_opa(page_main, LV_OPA_TRANSP, 0);
-  lv_obj_set_scrollbar_mode(page_main, LV_SCROLLBAR_MODE_OFF);
-  lv_obj_set_scroll_dir(page_main, LV_DIR_NONE);
+    // Left: "REEFILLA" + "POWER"
+    lv_obj_t *brand_col = lv_obj_create(top_bar);
+    lv_obj_remove_style_all(brand_col);
+    lv_obj_set_size(brand_col, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+    lv_obj_align(brand_col, LV_ALIGN_LEFT_MID, 20, 0);
+    lv_obj_set_flex_flow(brand_col, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(brand_col, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_column(brand_col, 5, 0);
 
-  lv_obj_t *page_secondary = lv_obj_create(pages);
-  lv_obj_remove_style_all(page_secondary);
-  lv_obj_set_size(page_secondary, lv_pct(100), lv_pct(100));
-  lv_obj_set_style_bg_opa(page_secondary, LV_OPA_TRANSP, 0);
-  lv_obj_set_scrollbar_mode(page_secondary, LV_SCROLLBAR_MODE_OFF);
-  lv_obj_set_scroll_dir(page_secondary, LV_DIR_NONE);
-  lv_obj_t *page2_label = lv_label_create(page_secondary);
-  lv_label_set_text(page2_label, "COMING SOON");
-  lv_obj_set_style_text_color(page2_label, lv_color_white(), 0);
-  lv_obj_center(page2_label);
+    label_brand = make_label(brand_col, "REEFILLA", &lv_font_montserrat_14, col_accent);
+    make_label(brand_col, "POWER", &lv_font_montserrat_14, col_vdim);
 
-  // --------- Riga superiore: testo tempo, valore, icone ---------
-  lv_obj_t *top_row = lv_obj_create(page_main);
-  lv_obj_remove_style_all(top_row);
-  lv_obj_set_size(top_row, lv_pct(100), 90);
-  lv_obj_align(top_row, LV_ALIGN_TOP_MID, 0, 12);
-  lv_obj_set_flex_flow(top_row, LV_FLEX_FLOW_ROW);
-  lv_obj_set_flex_align(top_row,
-                        LV_FLEX_ALIGN_SPACE_BETWEEN,
-                        LV_FLEX_ALIGN_CENTER,
-                        LV_FLEX_ALIGN_CENTER);
-  lv_obj_set_style_pad_left(top_row, 20, 0);
-  lv_obj_set_style_pad_right(top_row, 20, 0);
+    // Center: "AUTONOMIA" title + time value
+    lv_obj_t *time_col = lv_obj_create(top_bar);
+    lv_obj_remove_style_all(time_col);
+    lv_obj_set_size(time_col, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+    lv_obj_align(time_col, LV_ALIGN_CENTER, 0, 0);
+    lv_obj_set_flex_flow(time_col, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(time_col, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_row(time_col, 1, 0);
 
-  lv_obj_t *time_block = lv_obj_create(top_row);
-  lv_obj_remove_style_all(time_block);
-  lv_obj_set_size(time_block, 200, LV_SIZE_CONTENT);
-  lv_obj_set_style_text_color(time_block, lv_color_white(), 0);
-  lv_obj_set_style_text_align(time_block, LV_TEXT_ALIGN_LEFT, 0);
+    label_auto_title = make_label(time_col, "AUTONOMIA", &lv_font_montserrat_14, col_dim, LV_TEXT_ALIGN_CENTER);
+    label_time_value = make_label(time_col, DASHES, &lv_font_montserrat_20, col_white88, LV_TEXT_ALIGN_CENTER);
 
-  label_time_title = lv_label_create(time_block);
-  lv_label_set_text(label_time_title, "TIME\nREMAINING");
-  lv_obj_set_style_text_font(label_time_title, &lv_font_montserrat_28, 0);
-  lv_obj_set_style_text_color(label_time_title, lv_color_white(), 0);
-  lv_obj_set_style_text_align(label_time_title, LV_TEXT_ALIGN_LEFT, 0);
+    // Right: status dot + label
+    lv_obj_t *status_row = lv_obj_create(top_bar);
+    lv_obj_remove_style_all(status_row);
+    lv_obj_set_size(status_row, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+    lv_obj_align(status_row, LV_ALIGN_RIGHT_MID, -20, 0);
+    lv_obj_set_flex_flow(status_row, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(status_row, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_column(status_row, 6, 0);
 
-  lv_obj_t *icon_row = lv_obj_create(top_row);
-  lv_obj_remove_style_all(icon_row);
-  lv_obj_set_flex_flow(icon_row, LV_FLEX_FLOW_ROW);
-  lv_obj_set_flex_align(icon_row,
-                        LV_FLEX_ALIGN_CENTER,
-                        LV_FLEX_ALIGN_CENTER,
-                        LV_FLEX_ALIGN_CENTER);
-  lv_obj_set_style_pad_column(icon_row, 16, 0);
+    dot_status = lv_obj_create(status_row);
+    lv_obj_remove_style_all(dot_status);
+    lv_obj_set_size(dot_status, 10, 10);
+    lv_obj_set_style_radius(dot_status, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_bg_color(dot_status, col_dim, 0);
+    lv_obj_set_style_bg_opa(dot_status, LV_OPA_COVER, 0);
 
-  // --------- Icone stato ---------
-  icon_warn = lv_obj_create(icon_row);
-  lv_obj_remove_style_all(icon_warn);
-  lv_obj_set_size(icon_warn, 46, 46);
-  lv_obj_set_style_radius(icon_warn, LV_RADIUS_CIRCLE, 0);
-  lv_obj_set_style_bg_color(icon_warn, lv_color_hex(0xFFC857), 0);
-  lv_obj_set_style_bg_opa(icon_warn, LV_OPA_COVER, 0);
-  lv_obj_set_style_shadow_width(icon_warn, 12, 0);
-  lv_obj_set_style_shadow_opa(icon_warn, LV_OPA_30, 0);
-  lv_obj_t *warn_label = lv_label_create(icon_warn);
-  lv_label_set_text(warn_label, "!");
-  lv_obj_set_style_text_color(warn_label, lv_color_black(), 0);
-  lv_obj_center(warn_label);
+    label_status_text = make_label(status_row, DASHES, &lv_font_montserrat_14, col_dim);
 
-  icon_stop = lv_obj_create(icon_row);
-  lv_obj_remove_style_all(icon_stop);
-  lv_obj_set_size(icon_stop, 46, 46);
-  lv_obj_set_style_radius(icon_stop, LV_RADIUS_CIRCLE, 0);
-  lv_obj_set_style_bg_color(icon_stop, lv_color_hex(0xF05454), 0);
-  lv_obj_set_style_bg_opa(icon_stop, LV_OPA_COVER, 0);
-  lv_obj_set_style_shadow_width(icon_stop, 12, 0);
-  lv_obj_set_style_shadow_opa(icon_stop, LV_OPA_30, 0);
-  lv_obj_t *stop_label = lv_label_create(icon_stop);
-  lv_label_set_text(stop_label, "X");
-  lv_obj_set_style_text_color(stop_label, lv_color_white(), 0);
-  lv_obj_center(stop_label);
+    // ── ARC GAUGE ────────────────────────────────────────────────────────────
+    // Center on screen: (240, 236) → top-left of 260×260 widget: (110, 106)
+    // Rotation 120° + bg_angles(0, 300) → 300° arc, gap at bottom 60°
+    const lv_coord_t ARC_SZ = 260;
+    const lv_coord_t ARC_W  = 14;
+    const lv_coord_t arc_x  = 240 - ARC_SZ / 2;   // 110
+    const lv_coord_t arc_y  = 236 - ARC_SZ / 2;   // 106
 
-  // --------- Valore tempo centrato orizzontalmente ---------
-  lv_obj_t *time_value_block = lv_obj_create(page_main);
-  lv_obj_remove_style_all(time_value_block);
-  lv_obj_set_size(time_value_block, 140, 90);
-  lv_obj_align(time_value_block, LV_ALIGN_TOP_MID, 0, 12);
-  lv_obj_set_flex_flow(time_value_block, LV_FLEX_FLOW_COLUMN);
-  lv_obj_set_flex_align(time_value_block,
-                        LV_FLEX_ALIGN_CENTER,
-                        LV_FLEX_ALIGN_CENTER,
-                        LV_FLEX_ALIGN_CENTER);
-  lv_obj_set_style_text_color(time_value_block, lv_color_white(), 0);
-  lv_obj_move_foreground(time_value_block);
+    // Background track
+    soc_arc_bg = lv_arc_create(scr);
+    lv_obj_set_size(soc_arc_bg, ARC_SZ, ARC_SZ);
+    lv_obj_set_pos(soc_arc_bg, arc_x, arc_y);
+    lv_arc_set_rotation(soc_arc_bg, 120);
+    lv_arc_set_bg_angles(soc_arc_bg, 0, 300);
+    lv_arc_set_range(soc_arc_bg, 0, 100);
+    lv_arc_set_value(soc_arc_bg, 100);
+    lv_obj_clear_flag(soc_arc_bg, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_style_arc_width(soc_arc_bg, ARC_W, LV_PART_MAIN);
+    lv_obj_set_style_arc_color(soc_arc_bg, lv_color_hex(CLR_TRACK), LV_PART_MAIN);
+    lv_obj_set_style_arc_opa(soc_arc_bg, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_arc_opa(soc_arc_bg, LV_OPA_TRANSP, LV_PART_INDICATOR);
+    lv_obj_set_style_bg_opa(soc_arc_bg, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_bg_opa(soc_arc_bg, LV_OPA_TRANSP, LV_PART_KNOB);
 
-  label_time_value = lv_label_create(time_value_block);
-  lv_label_set_text(label_time_value, UNAVAILABLE_TEXT);
-  lv_obj_set_style_text_font(label_time_value, &lv_font_montserrat_32, 0);
-  lv_obj_set_style_text_align(label_time_value, LV_TEXT_ALIGN_CENTER, 0);
+    // Fill arc
+    soc_arc_fg = lv_arc_create(scr);
+    lv_obj_set_size(soc_arc_fg, ARC_SZ, ARC_SZ);
+    lv_obj_set_pos(soc_arc_fg, arc_x, arc_y);
+    lv_arc_set_rotation(soc_arc_fg, 120);
+    lv_arc_set_bg_angles(soc_arc_fg, 0, 300);
+    lv_arc_set_range(soc_arc_fg, 0, 100);
+    lv_arc_set_value(soc_arc_fg, 0);
+    lv_obj_clear_flag(soc_arc_fg, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_style_arc_width(soc_arc_fg, ARC_W, LV_PART_MAIN);
+    lv_obj_set_style_arc_color(soc_arc_fg, lv_color_hex(CLR_TRACK), LV_PART_MAIN);
+    lv_obj_set_style_arc_width(soc_arc_fg, ARC_W, LV_PART_INDICATOR);
+    lv_obj_set_style_arc_color(soc_arc_fg, col_accent, LV_PART_INDICATOR);
+    lv_obj_set_style_arc_opa(soc_arc_fg, LV_OPA_COVER, LV_PART_INDICATOR);
+    lv_obj_set_style_bg_opa(soc_arc_fg, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_bg_opa(soc_arc_fg, LV_OPA_TRANSP, LV_PART_KNOB);
+    lv_obj_move_foreground(soc_arc_fg);
 
-  label_time_unit = lv_label_create(time_value_block);
-  lv_label_set_text(label_time_unit, "min");
-  lv_obj_set_style_text_font(label_time_unit, &lv_font_montserrat_20, 0);
-  lv_obj_set_style_text_align(label_time_unit, LV_TEXT_ALIGN_CENTER, 0);
+    // ── CENTER TEXT ──────────────────────────────────────────────────────────
+    // Positioned over arc center (240, 236)
+    lv_obj_t *center_col = lv_obj_create(scr);
+    lv_obj_remove_style_all(center_col);
+    lv_obj_set_size(center_col, 200, LV_SIZE_CONTENT);
+    lv_obj_align(center_col, LV_ALIGN_CENTER, 0, -4);     // arc center at y=236, screen center 240
+    lv_obj_set_flex_flow(center_col, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(center_col, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_row(center_col, 4, 0);
+    lv_obj_move_foreground(center_col);
 
-  // --------- Gauge circolare ---------
-  const lv_coord_t arc_size = 260;
+    label_soc_value = make_label(center_col, DASHES, &lv_font_montserrat_48, col_accent, LV_TEXT_ALIGN_CENTER);
 
-  soc_arc_bg = lv_arc_create(page_main);
-  lv_obj_set_size(soc_arc_bg, arc_size, arc_size);
-  lv_arc_set_range(soc_arc_bg, 0, 100);
-  lv_arc_set_rotation(soc_arc_bg, 270);
-  lv_arc_set_bg_angles(soc_arc_bg, 20, 340);
-  lv_arc_set_mode(soc_arc_bg, LV_ARC_MODE_REVERSE);
-  lv_arc_set_value(soc_arc_bg, 100);
-  lv_obj_align(soc_arc_bg, LV_ALIGN_CENTER, 0, -10);
-  lv_obj_clear_flag(soc_arc_bg, LV_OBJ_FLAG_CLICKABLE);
-  lv_obj_set_style_arc_width(soc_arc_bg, 26, LV_PART_MAIN);
-  lv_obj_set_style_arc_color(soc_arc_bg, lv_color_hex(0x007E81), LV_PART_MAIN);
-  lv_obj_set_style_arc_opa(soc_arc_bg, LV_OPA_COVER, LV_PART_MAIN);
-  lv_obj_set_style_arc_opa(soc_arc_bg, LV_OPA_TRANSP, LV_PART_INDICATOR);
-  lv_obj_set_style_bg_opa(soc_arc_bg, LV_OPA_TRANSP, LV_PART_KNOB);
+    label_soc_sub = make_label(center_col, "%", &lv_font_montserrat_28, col_dim, LV_TEXT_ALIGN_CENTER);
 
-  soc_arc_fg = lv_arc_create(page_main);
-  lv_obj_set_size(soc_arc_fg, arc_size, arc_size);
-  lv_arc_set_range(soc_arc_fg, 0, 100);
-  lv_arc_set_rotation(soc_arc_fg, 270);
-  lv_arc_set_bg_angles(soc_arc_fg, 20, 340);
-  lv_arc_set_mode(soc_arc_fg, LV_ARC_MODE_REVERSE);
-  lv_arc_set_value(soc_arc_fg, 0);
-  lv_obj_align(soc_arc_fg, LV_ALIGN_CENTER, 0, -10);
-  lv_obj_clear_flag(soc_arc_fg, LV_OBJ_FLAG_CLICKABLE);
-  lv_obj_set_style_arc_width(soc_arc_fg, 26, LV_PART_MAIN);
-  lv_obj_set_style_arc_color(soc_arc_fg, lv_color_hex(0x00585B), LV_PART_MAIN);
-  lv_obj_set_style_arc_width(soc_arc_fg, 26, LV_PART_INDICATOR);
-  lv_obj_set_style_arc_color(soc_arc_fg, lv_palette_lighten(LV_PALETTE_CYAN, 2), LV_PART_INDICATOR);
-  lv_obj_set_style_arc_opa(soc_arc_fg, LV_OPA_COVER, LV_PART_INDICATOR);
-  lv_obj_set_style_bg_opa(soc_arc_fg, LV_OPA_TRANSP, LV_PART_KNOB);
-  lv_obj_move_foreground(soc_arc_fg);
+    // ── ARC EDGE LABELS ──────────────────────────────────────────────────────
+    // "0%"   at arc start: angle 120° from center (240,236), R=130 + gap offset
+    // In SVG: 120° → x=cx+R*cos(120°)=240-65=175, y=cy+R*sin(120°)=236+112=348
+    // Add a bit of offset outward to clear the arc
+    // Positions from HTML: cx-118=122 and cx+118=358, y = SVG(316)+40 = 356
+    // text-anchor="middle" → top-left = center_x - half_label_width, top_y = y - font_height
+    label_arc_start = make_label(scr, "0%", &lv_font_montserrat_14, col_vdim, LV_TEXT_ALIGN_CENTER);
+    lv_obj_set_pos(label_arc_start, 113, 342);   // center x≈122, baseline y≈356
 
-  // --------- Testi centrali ---------
-  lv_obj_t *soc_center = lv_obj_create(page_main);
-  lv_obj_remove_style_all(soc_center);
-  lv_obj_set_size(soc_center, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
-  lv_obj_align(soc_center, LV_ALIGN_CENTER, 0, -10);
-  lv_obj_set_flex_flow(soc_center, LV_FLEX_FLOW_COLUMN);
-  lv_obj_set_flex_align(soc_center,
-                        LV_FLEX_ALIGN_CENTER,
-                        LV_FLEX_ALIGN_CENTER,
-                        LV_FLEX_ALIGN_CENTER);
-  lv_obj_set_style_pad_row(soc_center, 6, 0);
-  lv_obj_set_style_text_align(soc_center, LV_TEXT_ALIGN_CENTER, 0);
-  lv_obj_set_style_text_color(soc_center, lv_color_white(), 0);
-  lv_obj_set_style_text_opa(soc_center, LV_OPA_COVER, 0);
-  lv_obj_move_foreground(soc_center);
+    label_arc_end = make_label(scr, "100%", &lv_font_montserrat_14, col_vdim, LV_TEXT_ALIGN_CENTER);
+    lv_obj_set_pos(label_arc_end, 340, 342);     // center x≈358, baseline y≈356
 
-  label_soc_value = lv_label_create(soc_center);
-  lv_label_set_text(label_soc_value, UNAVAILABLE_TEXT);
-  lv_obj_set_style_text_font(label_soc_value, &lv_font_montserrat_48, 0);
-  lv_obj_set_style_text_color(label_soc_value, lv_color_white(), 0);
-  lv_obj_set_style_text_opa(label_soc_value, LV_OPA_COVER, 0);
+    // ── HORIZONTAL DIVIDER ────────────────────────────────────────────────────
+    lv_obj_t *divider = lv_obj_create(scr);
+    lv_obj_remove_style_all(divider);
+    lv_obj_set_size(divider, 440, 1);
+    lv_obj_align(divider, LV_ALIGN_BOTTOM_MID, 0, -110);
+    lv_obj_set_style_bg_color(divider, lv_color_hex(CLR_DIVIDER), 0);
+    lv_obj_set_style_bg_opa(divider, LV_OPA_COVER, 0);
 
-  label_soc_percent = lv_label_create(soc_center);
-  lv_label_set_text(label_soc_percent, "%");
-  lv_obj_set_style_text_font(label_soc_percent, &lv_font_montserrat_32, 0);
-  lv_obj_set_style_text_color(label_soc_percent, lv_color_white(), 0);
-  lv_obj_set_style_text_opa(label_soc_percent, LV_OPA_COVER, 0);
+    // ── POWER LINES ──────────────────────────────────────────────────────────
+    // y=370 to y=460, height=90 (lascia 20px in basso per la WiFi bar)
+    lv_obj_t *power_row = lv_obj_create(scr);
+    lv_obj_remove_style_all(power_row);
+    lv_obj_set_size(power_row, 480, 90);
+    lv_obj_align(power_row, LV_ALIGN_BOTTOM_MID, 0, -20);
+    lv_obj_set_flex_flow(power_row, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(power_row, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_left(power_row, 16, 0);
+    lv_obj_set_style_pad_right(power_row, 16, 0);
+    lv_obj_set_scroll_dir(power_row, LV_DIR_NONE);
 
-  label_soc_state = lv_label_create(soc_center);
-  lv_label_set_text(label_soc_state, UNAVAILABLE_TEXT);
-  lv_obj_set_style_text_color(label_soc_state, lv_color_white(), 0);
-  lv_obj_set_style_text_opa(label_soc_state, LV_OPA_COVER, 0);
+    const char *line_titles[3] = { "LINEA 1", "LINEA 2", "LINEA 3" };
+    for (int i = 0; i < 3; ++i) {
+        if (i > 0) {
+            lv_obj_t *vsep = lv_obj_create(power_row);
+            lv_obj_remove_style_all(vsep);
+            lv_obj_set_size(vsep, 1, 50);
+            lv_obj_set_style_bg_color(vsep, lv_color_hex(CLR_DIVIDER), 0);
+            lv_obj_set_style_bg_opa(vsep, LV_OPA_COVER, 0);
+            lv_obj_set_flex_grow(vsep, 0);
+            vsep_obj[i - 1] = vsep;   // vsep_obj[0] tra col0–col1, vsep_obj[1] tra col1–col2
+        }
 
-  // --------- Fascia inferiore con 3 colonne ---------
-  lv_obj_t *bottom_row = lv_obj_create(page_main);
-  lv_obj_remove_style_all(bottom_row);
-  lv_obj_set_size(bottom_row, lv_pct(100), 140);
-  lv_obj_align(bottom_row, LV_ALIGN_BOTTOM_MID, 0, 8);
-  lv_obj_set_flex_flow(bottom_row, LV_FLEX_FLOW_ROW);
-  lv_obj_set_flex_align(bottom_row,
-                        LV_FLEX_ALIGN_CENTER,
-                        LV_FLEX_ALIGN_CENTER,
-                        LV_FLEX_ALIGN_CENTER);
-  lv_obj_set_style_pad_column(bottom_row, 30, 0);
-  lv_obj_set_style_pad_left(bottom_row, 20, 0);
-  lv_obj_set_style_pad_right(bottom_row, 20, 0);
+        lv_obj_t *col = lv_obj_create(power_row);
+        lv_obj_remove_style_all(col);
+        lv_obj_set_flex_grow(col, 1);
+        lv_obj_set_height(col, 90);
+        lv_obj_set_flex_flow(col, LV_FLEX_FLOW_COLUMN);
+        lv_obj_set_flex_align(col, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+        lv_obj_set_style_pad_row(col, 2, 0);
+        lv_obj_set_style_text_align(col, LV_TEXT_ALIGN_CENTER, 0);
+        col_obj[i] = col;
 
-  const char *line_titles[3] = { "LINE 1", "LINE 2", "LINE 3" };
-  for (int i = 0; i < 3; ++i) {
-    lv_obj_t *col = lv_obj_create(bottom_row);
-    lv_obj_remove_style_all(col);
-    lv_obj_set_flex_flow(col, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_flex_align(col,
-                          LV_FLEX_ALIGN_CENTER,
-                          LV_FLEX_ALIGN_CENTER,
-                          LV_FLEX_ALIGN_CENTER);
-    lv_obj_set_style_text_align(col, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_set_style_text_color(col, lv_color_white(), 0);
-    lv_obj_set_style_pad_all(col, 0, 0);
-    lv_obj_set_style_pad_row(col, 6, 0);
-    lv_obj_set_flex_grow(col, 1);
-    lv_obj_set_height(col, lv_pct(100));
+        label_line_title[i] = make_label(col, line_titles[i], &lv_font_montserrat_14, col_dim, LV_TEXT_ALIGN_CENTER);
+        label_line_value[i] = make_label(col, DASHES, &lv_font_montserrat_20, lv_color_hex(CLR_TEAL), LV_TEXT_ALIGN_CENTER);
+        label_line_unit[i]  = make_label(col, "W", &lv_font_montserrat_14, col_vdim, LV_TEXT_ALIGN_CENTER);
+    }
 
-    label_line_name[i] = lv_label_create(col);
-    lv_label_set_text(label_line_name[i], line_titles[i]);
+    // ── WIFI BAR ─────────────────────────────────────────────────────────────
+    lv_obj_t *wifi_bar = lv_obj_create(scr);
+    lv_obj_remove_style_all(wifi_bar);
+    lv_obj_set_size(wifi_bar, 480, 20);
+    lv_obj_align(wifi_bar, LV_ALIGN_BOTTOM_MID, 0, 0);
+    lv_obj_set_style_border_width(wifi_bar, 1, 0);
+    lv_obj_set_style_border_color(wifi_bar, lv_color_hex(CLR_BORDER), 0);
+    lv_obj_set_style_border_side(wifi_bar, LV_BORDER_SIDE_TOP, 0);
+    lv_obj_set_style_bg_opa(wifi_bar, LV_OPA_TRANSP, 0);
+    lv_obj_set_flex_flow(wifi_bar, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(wifi_bar, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_scroll_dir(wifi_bar, LV_DIR_NONE);
 
-    label_line_value[i] = lv_label_create(col);
-    lv_label_set_text(label_line_value[i], UNAVAILABLE_TEXT);
-    lv_obj_set_style_text_font(label_line_value[i], &lv_font_montserrat_32, 0);
+    label_wifi = make_label(wifi_bar, "WiFi: ---", &lv_font_montserrat_14, col_vdim, LV_TEXT_ALIGN_CENTER);
 
-    label_line_unit[i] = lv_label_create(col);
-    lv_label_set_text(label_line_unit[i], "W");
-  }
-
-  Serial.println("[ui_main] UI stile gauge pronta");
+    Serial.println("[ui_main] UI REEFILLA Dashboard pronta");
 }
