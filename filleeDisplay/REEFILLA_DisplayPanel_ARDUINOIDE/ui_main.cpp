@@ -7,6 +7,11 @@
 #include "ui_main.h"
 #include "dbc_decoder.h"
 
+LV_FONT_DECLARE(font_orbitron_14);
+LV_FONT_DECLARE(font_orbitron_20);
+LV_FONT_DECLARE(font_orbitron_28);
+LV_FONT_DECLARE(font_orbitron_48);
+
 // ── Palette ────────────────────────────────────────────────────────────────
 #define CLR_BG          0x0A0F1A
 #define CLR_ACCENT      0x22C5C8  // oklch(0.75 0.18 193) ≈ teal
@@ -273,8 +278,8 @@ void ui_main_init()
     lv_obj_set_flex_align(brand_col, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_column(brand_col, 5, 0);
 
-    label_brand = make_label(brand_col, "REEFILLA", &lv_font_montserrat_14, col_accent);
-    make_label(brand_col, "POWER", &lv_font_montserrat_14, col_vdim);
+    label_brand = make_label(brand_col, "REEFILLA", &font_orbitron_14, col_accent);
+    make_label(brand_col, "POWER", &font_orbitron_14, col_vdim);
 
     // Center: "AUTONOMIA" title + time value
     lv_obj_t *time_col = lv_obj_create(top_bar);
@@ -285,8 +290,8 @@ void ui_main_init()
     lv_obj_set_flex_align(time_col, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_row(time_col, 1, 0);
 
-    label_auto_title = make_label(time_col, "AUTONOMIA", &lv_font_montserrat_14, col_dim, LV_TEXT_ALIGN_CENTER);
-    label_time_value = make_label(time_col, DASHES, &lv_font_montserrat_20, col_white88, LV_TEXT_ALIGN_CENTER);
+    label_auto_title = make_label(time_col, "AUTONOMIA", &font_orbitron_14, col_dim, LV_TEXT_ALIGN_CENTER);
+    label_time_value = make_label(time_col, DASHES, &font_orbitron_20, col_white88, LV_TEXT_ALIGN_CENTER);
 
     // Right: status dot + label
     lv_obj_t *status_row = lv_obj_create(top_bar);
@@ -304,7 +309,7 @@ void ui_main_init()
     lv_obj_set_style_bg_color(dot_status, col_dim, 0);
     lv_obj_set_style_bg_opa(dot_status, LV_OPA_COVER, 0);
 
-    label_status_text = make_label(status_row, DASHES, &lv_font_montserrat_14, col_dim);
+    label_status_text = make_label(status_row, DASHES, &font_orbitron_14, col_dim);
 
     // ── ARC GAUGE ────────────────────────────────────────────────────────────
     // Center on screen: (240, 236) → top-left of 260×260 widget: (110, 106)
@@ -359,9 +364,9 @@ void ui_main_init()
     lv_obj_set_style_pad_row(center_col, 4, 0);
     lv_obj_move_foreground(center_col);
 
-    label_soc_value = make_label(center_col, DASHES, &lv_font_montserrat_48, col_accent, LV_TEXT_ALIGN_CENTER);
+    label_soc_value = make_label(center_col, DASHES, &font_orbitron_48, col_accent, LV_TEXT_ALIGN_CENTER);
 
-    label_soc_sub = make_label(center_col, "%", &lv_font_montserrat_28, col_dim, LV_TEXT_ALIGN_CENTER);
+    label_soc_sub = make_label(center_col, "%", &font_orbitron_28, col_dim, LV_TEXT_ALIGN_CENTER);
 
     // ── ARC EDGE LABELS ──────────────────────────────────────────────────────
     // "0%"   at arc start: angle 120° from center (240,236), R=130 + gap offset
@@ -369,10 +374,10 @@ void ui_main_init()
     // Add a bit of offset outward to clear the arc
     // Positions from HTML: cx-118=122 and cx+118=358, y = SVG(316)+40 = 356
     // text-anchor="middle" → top-left = center_x - half_label_width, top_y = y - font_height
-    label_arc_start = make_label(scr, "0%", &lv_font_montserrat_14, col_vdim, LV_TEXT_ALIGN_CENTER);
+    label_arc_start = make_label(scr, "0%", &font_orbitron_14, col_vdim, LV_TEXT_ALIGN_CENTER);
     lv_obj_set_pos(label_arc_start, 113, 342);   // center x≈122, baseline y≈356
 
-    label_arc_end = make_label(scr, "100%", &lv_font_montserrat_14, col_vdim, LV_TEXT_ALIGN_CENTER);
+    label_arc_end = make_label(scr, "100%", &font_orbitron_14, col_vdim, LV_TEXT_ALIGN_CENTER);
     lv_obj_set_pos(label_arc_end, 340, 342);     // center x≈358, baseline y≈356
 
     // ── HORIZONTAL DIVIDER ────────────────────────────────────────────────────
@@ -417,9 +422,9 @@ void ui_main_init()
         lv_obj_set_style_text_align(col, LV_TEXT_ALIGN_CENTER, 0);
         col_obj[i] = col;
 
-        label_line_title[i] = make_label(col, line_titles[i], &lv_font_montserrat_14, col_dim, LV_TEXT_ALIGN_CENTER);
-        label_line_value[i] = make_label(col, DASHES, &lv_font_montserrat_20, lv_color_hex(CLR_TEAL), LV_TEXT_ALIGN_CENTER);
-        label_line_unit[i]  = make_label(col, "W", &lv_font_montserrat_14, col_vdim, LV_TEXT_ALIGN_CENTER);
+        label_line_title[i] = make_label(col, line_titles[i], &font_orbitron_14, col_dim, LV_TEXT_ALIGN_CENTER);
+        label_line_value[i] = make_label(col, DASHES, &font_orbitron_20, lv_color_hex(CLR_TEAL), LV_TEXT_ALIGN_CENTER);
+        label_line_unit[i]  = make_label(col, "W", &font_orbitron_14, col_vdim, LV_TEXT_ALIGN_CENTER);
     }
 
     // ── WIFI BAR ─────────────────────────────────────────────────────────────
@@ -435,7 +440,7 @@ void ui_main_init()
     lv_obj_set_flex_align(wifi_bar, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_scroll_dir(wifi_bar, LV_DIR_NONE);
 
-    label_wifi = make_label(wifi_bar, "WiFi: ---", &lv_font_montserrat_14, col_vdim, LV_TEXT_ALIGN_CENTER);
+    label_wifi = make_label(wifi_bar, "WiFi: ---", &font_orbitron_14, col_vdim, LV_TEXT_ALIGN_CENTER);
 
     Serial.println("[ui_main] UI REEFILLA Dashboard pronta");
 }
