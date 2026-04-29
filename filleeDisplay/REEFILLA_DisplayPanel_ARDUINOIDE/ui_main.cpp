@@ -26,6 +26,8 @@ LV_FONT_DECLARE(font_orbitron_48);
 #define CLR_TEXT_DIM    0x636873  // rgba(255,255,255,0.35)
 #define CLR_TEXT_VDIM   0x3D424D  // rgba(255,255,255,0.20)
 #define CLR_WARM        0xC4A460  // oklch(0.75 0.12 60) — temperature
+#define CLR_LIME        0xD2F68C  // brand / values accent
+#define CLR_PURPLE      0x6666C5  // arc charged / wifi
 
 // ── LVGL objects ───────────────────────────────────────────────────────────
 
@@ -66,8 +68,7 @@ static const char        *DASHES       = "---";
 
 static lv_color_t soc_color(uint8_t pct)
 {
-    if (pct > 60) return lv_color_hex(CLR_GREEN);
-    if (pct > 25) return lv_color_hex(CLR_YELLOW);
+    if (pct > 25) return lv_color_hex(CLR_PURPLE);
     return lv_color_hex(CLR_RED);
 }
 
@@ -130,7 +131,7 @@ void ui_main_update()
             snprintf(buf, sizeof(buf), "%u", (unsigned)soc);
             lv_label_set_text(label_soc_value, buf);
         }
-        lv_obj_set_style_text_color(label_soc_value, arc_col, 0);
+        lv_obj_set_style_text_color(label_soc_value, lv_color_hex(CLR_LIME), 0);
     }
 
     // ── Status dot + label ──
@@ -196,10 +197,7 @@ void ui_main_update()
         if (val >= 0) snprintf(buf, sizeof(buf), "+%ld", (long)val);
         else          snprintf(buf, sizeof(buf), "%ld",  (long)val);
         lv_label_set_text(label_line_value[i], buf);
-        lv_obj_set_style_text_color(
-            label_line_value[i],
-            val < 0 ? lv_color_hex(CLR_TEAL) : lv_color_hex(CLR_GREEN),
-            0);
+        lv_obj_set_style_text_color(label_line_value[i], lv_color_hex(CLR_LIME), 0);
     }
 
     // ── WiFi / IP ──
@@ -220,7 +218,7 @@ void ui_main_update()
                          (unsigned)ip[0], (unsigned)ip[1],
                          (unsigned)ip[2], (unsigned)ip[3]);
                 lv_label_set_text(label_wifi, buf);
-                lv_obj_set_style_text_color(label_wifi, lv_color_hex(CLR_ACCENT), 0);
+                lv_obj_set_style_text_color(label_wifi, lv_color_hex(CLR_PURPLE), 0);
             }
         }
     }
@@ -246,7 +244,7 @@ static lv_obj_t *make_label(lv_obj_t *parent,
 
 void ui_main_init()
 {
-    Serial.println("[ui_main] Nuova UI REEFILLA Dashboard");
+    Serial.println("[ui_main] Nuova UI VOLTAB Dashboard");
 
     lv_obj_t *scr = lv_scr_act();
     lv_obj_set_style_bg_color(scr, lv_color_hex(CLR_BG), 0);
@@ -278,7 +276,7 @@ void ui_main_init()
     lv_obj_set_flex_align(brand_col, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_column(brand_col, 5, 0);
 
-    label_brand = make_label(brand_col, "REEFILLA", &font_orbitron_14, col_accent);
+    label_brand = make_label(brand_col, "VOLTAB", &font_orbitron_14, lv_color_hex(CLR_LIME));
     make_label(brand_col, "POWER", &font_orbitron_14, col_vdim);
 
     // Center: "AUTONOMIA" title + time value
@@ -442,5 +440,5 @@ void ui_main_init()
 
     label_wifi = make_label(wifi_bar, "WiFi: ---", &font_orbitron_14, col_vdim, LV_TEXT_ALIGN_CENTER);
 
-    Serial.println("[ui_main] UI REEFILLA Dashboard pronta");
+    Serial.println("[ui_main] UI VOLTAB Dashboard pronta");
 }
