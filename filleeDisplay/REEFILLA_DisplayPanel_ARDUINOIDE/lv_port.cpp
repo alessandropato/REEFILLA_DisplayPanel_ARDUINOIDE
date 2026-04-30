@@ -54,9 +54,8 @@ static void my_lvgl_touch_read_cb(lv_indev_drv_t *drv, lv_indev_data_t *data)
     int16_t x = points[0].x;
     int16_t y = points[0].y;
 
-    // Se serve, qui puoi aggiustare orientamento:
-    // int16_t tmp = x; x = y; y = tmp;
-    // y = LVGL_VER_RES - 1 - y;
+    x = LVGL_HOR_RES - 1 - x;
+    y = LVGL_VER_RES - 1 - y;
 
     if (x < 0) x = 0;
     if (y < 0) y = 0;
@@ -91,6 +90,8 @@ void lv_port_init(ESP_PanelLcd *lcd, ESP_PanelTouch *touch)
   lvgl_disp_drv.ver_res  = LVGL_VER_RES;
   lvgl_disp_drv.flush_cb = my_lvgl_flush_cb;
   lvgl_disp_drv.draw_buf = &lvgl_draw_buf;
+  lvgl_disp_drv.sw_rotate = 1;
+  lvgl_disp_drv.rotated   = LV_DISP_ROT_180;
 
   Serial.println("[lv_port] lv_disp_drv_register()");
   lv_disp_t *disp = lv_disp_drv_register(&lvgl_disp_drv);
