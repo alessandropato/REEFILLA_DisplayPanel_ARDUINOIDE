@@ -37,11 +37,19 @@ static void v4_touch_board_prepare()
   }
 
   uint8_t cfg1[2] = {0x02, 0xFF};
+  // Output register: keep all HIGH except EXIO6 (bit 6) = LOW to silence buzzer
+  uint8_t cfg_out[2] = {0x01, 0xBF};
   uint8_t cfg2[2] = {0x03, 0x3A};
 
   err = i2c_master_write_to_device(port, 0x24, cfg1, sizeof(cfg1), pdMS_TO_TICKS(100));
   if (err != ESP_OK) {
     Serial.printf("[panel_port] WARN: write 0x24 reg 0x02 failed (%d)\n", (int)err);
+  }
+
+  // Set output LOW before enabling direction to avoid buzzer glitch on startup
+  err = i2c_master_write_to_device(port, 0x24, cfg_out, sizeof(cfg_out), pdMS_TO_TICKS(100));
+  if (err != ESP_OK) {
+    Serial.printf("[panel_port] WARN: write 0x24 reg 0x01 failed (%d)\n", (int)err);
   }
 
   err = i2c_master_write_to_device(port, 0x24, cfg2, sizeof(cfg2), pdMS_TO_TICKS(100));
