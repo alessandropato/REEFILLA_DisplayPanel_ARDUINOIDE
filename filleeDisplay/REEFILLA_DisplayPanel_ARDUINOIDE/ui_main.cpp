@@ -19,6 +19,7 @@ LV_FONT_DECLARE(font_orbitron_48);
 #define CLR_PURPLE   0x6666C5
 #define CLR_LIME     0xD2F68C
 #define CLR_WHITE    0xFDFBF2
+#define CLR_GREEN    0x4ADE80
 #define CLR_YELLOW   0xF0B429
 #define CLR_RED      0xEF4444
 #define CLR_TEAL     0x22D3EE
@@ -84,7 +85,7 @@ struct StatusInfo {
 static StatusInfo state_info(int16_t state)
 {
     // Mapping dal design HTML:
-    //   carica  → dot=accent2(purple), label=accent(lime)
+    //   carica  → dot=green,           label=accent(lime)
     //   scarica → dot=accent2(purple), label=accent2(purple)
     //   standby → dot=dim,             label=dim
     //   warning → dot=yellow,          label=yellow
@@ -93,7 +94,7 @@ static StatusInfo state_info(int16_t state)
         case 0:  return { lv_color_hex(CLR_TEXT_DIM), lv_color_hex(CLR_TEXT_DIM), "INIT"            };
         case 1:  return { lv_color_hex(CLR_TEXT_DIM), lv_color_hex(CLR_TEXT_DIM), "ALIGN"           };
         case 2:  return { lv_color_hex(CLR_TEXT_DIM), lv_color_hex(CLR_TEXT_DIM), "STANDBY"         };
-        case 3:  return { lv_color_hex(CLR_PURPLE),   lv_color_hex(CLR_LIME),     "CARICA"          };
+        case 3:  return { lv_color_hex(CLR_GREEN),    lv_color_hex(CLR_LIME),     "CARICA"          };
         case 4:  return { lv_color_hex(CLR_PURPLE),   lv_color_hex(CLR_PURPLE),   "SCARICA"         };
         case 5:  return { lv_color_hex(CLR_PURPLE),   lv_color_hex(CLR_PURPLE),   "SCARICA ON-GRID" };
         case 90: return { lv_color_hex(CLR_YELLOW),   lv_color_hex(CLR_YELLOW),   "WARNING"         };
@@ -344,8 +345,12 @@ void ui_main_update()
         if (label_status_text) lv_label_set_text(label_status_text, DASHES);
     }
 
-    // ── Autonomia ──
+    // ── Tempo allo 0% / 100% ──
     const uint16_t time_min = pick_time_min(s, status_valid);
+    if (label_auto_title) {
+        const bool charging = status_valid && s.main_state == 3;
+        lv_label_set_text(label_auto_title, charging ? "TEMPO AL 100%" : "TEMPO ALLO 0%");
+    }
     if (label_time_value) {
         if (time_min == TIME_INVALID) {
             lv_label_set_text(label_time_value, DASHES);
