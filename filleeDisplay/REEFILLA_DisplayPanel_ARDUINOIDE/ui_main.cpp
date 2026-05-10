@@ -114,93 +114,166 @@ static uint16_t pick_time_min(const DbcState &s, bool status_valid)
     return TIME_INVALID;
 }
 
-// ── Polygon clipping (Sutherland-Hodgman, halfplane inferiore) ───────────────
-// Taglia il poligono a y >= y_min (porzione "lit"). Buffer out: n+1 punti max.
+struct Span {
+    lv_coord_t x1;
+    lv_coord_t x2;
+};
 
-static int clip_poly_lower(const lv_point_t *in, int n,
-                             lv_point_t *out, lv_coord_t y_min)
+static lv_color_t mix_hex(uint32_t a, uint32_t b, uint16_t num, uint16_t den)
 {
-    // Tieni i punti con y >= y_min (metà inferiore – la parte "lit")
-    int m = 0;
-    for (int i = 0; i < n; ++i) {
-        const lv_point_t a = in[i];
-        const lv_point_t b = in[(i + 1) % n];
-        const bool a_in = (a.y >= y_min);
-        const bool b_in = (b.y >= y_min);
-        if (a_in) out[m++] = a;
-        if (a_in != b_in) {
+    if (den == 0) return lv_color_hex(b);
+    if (num > den) num = den;
+
+    const uint8_t ar = (a >> 16) & 0xFF;
+    const uint8_t ag = (a >>  8) & 0xFF;
+    const uint8_t ab =  a        & 0xFF;
+    const uint8_t br = (b >> 16) & 0xFF;
+    const uint8_t bg = (b >>  8) & 0xFF;
+    const uint8_t bb =  b        & 0xFF;
+
+    const uint8_t r = ar + ((int16_t)br - ar) * (int32_t)num / den;
+    const uint8_t g = ag + ((int16_t)bg - ag) * (int32_t)num / den;
+    const uint8_t bl = ab + ((int16_t)bb - ab) * (int32_t)num / den;
+    return lv_color_make(r, g, bl);
+}
+
+static lv_color_t charge_edge_color(lv_coord_t y, lv_coord_t y_cut, bool low_soc)
+{
+    const uint32_t lit = low_soc ? CLR_RED : CLR_LIME;
+    static constexpr lv_coord_t EDGE_FADE_H = 28;
+
+    if (y <= y_cut) return lv_color_hex(CLR_DIM);
+    if (y >= y_cut + EDGE_FADE_H) return lv_color_hex(lit);
+    return mix_hex(CLR_DIM, lit, (uint16_t)(y - y_cut), EDGE_FADE_H);
+}
+
+static void sort_i32(int32_t *v, int n)
+{
+    for (int i = 1; i < n; ++i) {
+        const int32_t key = v[i];
+        int j = i - 1;
+        while (j >= 0 && v[j] > key) {
+            v[j + 1] = v[j];
+            --j;
+        }
+        v[j + 1] = key;
+    }
+}
+
+static void add_span(Span *spans, int &span_cnt, lv_coord_t x1, lv_coord_t x2)
+{
+    if (x2 <= x1) return;
+    if (x1 < 0) x1 = 0;
+    if (x2 > 480) x2 = 480;
+    if (span_cnt >= 12) return;
+
+    spans[span_cnt++] = { x1, x2 };
+}
+
+static void add_poly_spans(const lv_point_t *pts, int point_cnt,
+                           lv_coord_t y, Span *spans, int &span_cnt)
+{
+    int32_t xs[12];
+    int x_cnt = 0;
+    const int32_t scan_y = (int32_t)y * 256 + 128;
+
+    for (int i = 0; i < point_cnt; ++i) {
+        const lv_point_t a = pts[i];
+        const lv_point_t b = pts[(i + 1) % point_cnt];
+        const int32_t ay = (int32_t)a.y * 256;
+        const int32_t by = (int32_t)b.y * 256;
+        if ((ay <= scan_y && by > scan_y) || (by <= scan_y && ay > scan_y)) {
             const int32_t dy = (int32_t)b.y - a.y;
-            if (dy != 0) {
-                lv_point_t p;
-                p.y = y_min;
-                p.x = (lv_coord_t)(a.x + (int32_t)(y_min - a.y) * (b.x - a.x) / dy);
-                out[m++] = p;
+            if (dy != 0 && x_cnt < 12) {
+                xs[x_cnt++] = (int32_t)a.x * 256 +
+                              ((scan_y - ay) * ((int32_t)b.x - a.x)) / dy;
             }
         }
     }
-    return m;
+
+    sort_i32(xs, x_cnt);
+    for (int i = 0; i + 1 < x_cnt; i += 2) {
+        const lv_coord_t x1 = (lv_coord_t)(xs[i] / 256);
+        const lv_coord_t x2 = (lv_coord_t)((xs[i + 1] + 255) / 256);
+        add_span(spans, span_cnt, x1, x2);
+    }
+}
+
+static void sort_spans(Span *spans, int n)
+{
+    for (int i = 1; i < n; ++i) {
+        const Span key = spans[i];
+        int j = i - 1;
+        while (j >= 0 && spans[j].x1 > key.x1) {
+            spans[j + 1] = spans[j];
+            --j;
+        }
+        spans[j + 1] = key;
+    }
+}
+
+static void draw_span_row(lv_obj_t *canvas, lv_coord_t y, lv_color_t color,
+                          Span *spans, int span_cnt)
+{
+    if (span_cnt <= 0) return;
+    sort_spans(spans, span_cnt);
+
+    lv_draw_rect_dsc_t dsc;
+    lv_draw_rect_dsc_init(&dsc);
+    dsc.bg_color     = color;
+    dsc.border_width = 0;
+    dsc.radius       = 0;
+
+    lv_coord_t x1 = spans[0].x1;
+    lv_coord_t x2 = spans[0].x2;
+    for (int i = 1; i < span_cnt; ++i) {
+        if (spans[i].x1 <= x2) {
+            if (spans[i].x2 > x2) x2 = spans[i].x2;
+        } else {
+            lv_canvas_draw_rect(canvas, x1, y, x2 - x1, 1, &dsc);
+            x1 = spans[i].x1;
+            x2 = spans[i].x2;
+        }
+    }
+    lv_canvas_draw_rect(canvas, x1, y, x2 - x1, 1, &dsc);
 }
 
 static void draw_monogram(lv_obj_t *canvas, uint8_t soc_pct)
 {
     lv_canvas_fill_bg(canvas, lv_color_hex(CLR_BG), LV_OPA_COVER);
 
-    lv_coord_t y_cut;
-    if (soc_pct >= 100) {
-        y_cut = y_V_TOP;
-    } else {
-        y_cut = y_V_TOP + (lv_coord_t)((uint32_t)(100 - soc_pct) *
-                                        (uint32_t)(y_V_BOT - y_V_TOP) / 100);
-    }
+    const lv_coord_t y_cut = (soc_pct >= 100)
+        ? y_V_TOP
+        : y_V_TOP + (lv_coord_t)((uint32_t)(100 - soc_pct) *
+                                  (uint32_t)(y_V_BOT - y_V_TOP) / 100);
+    const bool low_soc = soc_pct <= 20;
 
-    const lv_color_t lit = (soc_pct >= 20) ? lv_color_hex(CLR_LIME)
-                                             : lv_color_hex(CLR_RED);
-
-    // Poligoni HTML decomposti in triangoli via ear-clipping.
-    // Coordinate da REEFILLA_Display_Preview.html (viewBox 0 0 480 311.5, 1:1 canvas).
-    // I triangoli sono sempre convessi: fill garantito indipendente dal fill-rule LVGL.
-    static const lv_point_t tris[16][3] = {
-        // left_arm (6 pt → 4 triangoli)
-        {{243,220},{143, 46},{ 96, 46}},
-        {{243,220},{ 96, 46},{221,260}},
-        {{243,220},{221,260},{257,260}},
-        {{257,260},{266,260},{243,220}},
-        // right_bolt (7 pt → 5 triangoli)
-        {{384, 46},{337, 46},{286,135}},
-        {{384, 46},{286,135},{303,135}},
-        {{384, 46},{303,135},{254,221}},
-        {{254,221},{360,126},{338,126}},
-        {{254,221},{338,126},{384, 46}},
-        // right_fill (colma il notch concavo del bolt)
-        {{304,135},{348,137},{254,221}},
-        // bottom_fill (8 pt → 6 triangoli)
-        {{253,237},{207,157},{161,157}},
-        {{253,237},{161,157},{192,210}},
-        {{253,237},{192,210},{221,259}},
-        {{253,237},{221,259},{235,259}},
-        {{253,237},{235,259},{240,259}},
-        {{240,259},{266,259},{253,237}},
+    static const lv_point_t left_arm[] = {
+        {143, 46}, { 96, 46}, {221,260}, {257,260}, {266,260}, {243,220}
+    };
+    static const lv_point_t right_bolt[] = {
+        {337, 46}, {286,135}, {303,135}, {254,221}, {360,126}, {338,126}, {384,46}
+    };
+    static const lv_point_t right_fill[] = {
+        {304,135}, {348,137}, {254,221}
+    };
+    static const lv_point_t bottom_fill[] = {
+        {207,157}, {161,157}, {192,210}, {221,259}, {235,259}, {240,259}, {266,259}, {253,237}
     };
 
-    lv_draw_rect_dsc_t dsc;
-    lv_draw_rect_dsc_init(&dsc);
-    dsc.border_width = 0;
-    dsc.radius       = 0;
+    for (lv_coord_t y = y_V_TOP; y < y_V_BOT; ++y) {
+        Span spans[12];
+        int span_cnt = 0;
 
-    lv_point_t clipped[8];
-    int nc;
+        add_poly_spans(left_arm,   6, y, spans, span_cnt);
+        add_poly_spans(right_bolt, 7, y, spans, span_cnt);
+        add_poly_spans(right_fill, 3, y, spans, span_cnt);
+        add_poly_spans(bottom_fill, 8, y, spans, span_cnt);
 
-    // Pass 1: V completa in CLR_DIM — forma sempre identica indipendente dal SOC
-    dsc.bg_color = lv_color_hex(CLR_DIM);
-    for (int t = 0; t < 16; ++t)
-        lv_canvas_draw_polygon(canvas, tris[t], 3, &dsc);
-
-    // Pass 2: sovrascrittura della porzione inferiore (y >= y_cut) con il colore lit
-    dsc.bg_color = lit;
-    for (int t = 0; t < 16; ++t) {
-        nc = clip_poly_lower(tris[t], 3, clipped, y_cut);
-        if (nc >= 3)
-            lv_canvas_draw_polygon(canvas, clipped, nc, &dsc);
+        const lv_color_t row_color = (y >= y_cut)
+            ? charge_edge_color(y, y_cut, low_soc)
+            : lv_color_hex(CLR_DIM);
+        draw_span_row(canvas, y, row_color, spans, span_cnt);
     }
 }
 
