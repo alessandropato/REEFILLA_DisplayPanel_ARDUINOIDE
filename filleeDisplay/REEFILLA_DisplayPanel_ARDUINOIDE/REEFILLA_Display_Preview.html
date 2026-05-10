@@ -1,530 +1,283 @@
 <!DOCTYPE html>
 <html lang="it">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=560">
-  <title>REEFILLA Display – Simulatore 480×480</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <style>
-    :root {
-      --bg:      #0A0F1A;
-      --accent:  #22C5C8;
-      --track:   #1C212C;
-      --border:  #14181F;
-      --divider: #1A2030;
-      --green:   #4ADE80;
-      --yellow:  #F0B429;
-      --red:     #EF4444;
-      --teal:    #22D3EE;
-      --w88:     #E0E0E0;
-      --dim:     #636873;
-      --vdim:    #3D424D;
-    }
+<meta charset="UTF-8" />
+<title>Display V3.1 (1)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --bg:        #0A0F1A;
+    --bg-deep:   #06090f;
+    --line:      #252C3B;
+    --line-soft: #181D28;
+    --accent:    #D2F68C;
+    --accent-2:  #6666C5;
+    --text:      #FDFBF2;
+    --dot:          var(--accent-2);
+    --dot-glow:     rgba(102,102,197,0.5);
+    --carica:       var(--accent);
+  }
+  html, body {
+    margin: 0; padding: 0;
+    background: var(--bg-deep);
+    min-height: 100vh;
+    font-family: 'Orbitron', sans-serif;
+    color: var(--text);
+    -webkit-font-smoothing: antialiased;
+  }
+  body {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 40px 16px;
+    box-sizing: border-box;
+  }
+  .frame {
+    position: relative;
+    width: 480px; height: 480px;
+    background: var(--bg);
+    overflow: hidden;
+    box-shadow: 0 8px 60px 0 rgba(0,0,0,0.95), 0 0 0 1px var(--line-soft);
+    flex: 0 0 auto;
+  }
+  .row-divider { position: absolute; left: 0; right: 0; height: 1px; background: var(--line); }
+  .div-top { top: 20.5px; }
+  .div-mid { top: 78.5px; }
 
-    * { box-sizing: border-box; margin: 0; padding: 0; }
+  .wifi {
+    position: absolute; left: 0; right: 0; top: 0; height: 20.5px;
+    display: flex; align-items: center; justify-content: center;
+    color: var(--accent); font-size: 11px; letter-spacing: 0.06em;
+  }
+  .topbar { position: absolute; left: 0; right: 0; top: 20.5px; height: 58px; }
+  .voltab-block {
+    position: absolute; left: 24px; top: 14px; width: 88px;
+    text-align: center; line-height: 1;
+  }
+  .voltab-block .voltab { color: var(--accent); font-size: 16px; letter-spacing: 0.04em; display: block; }
+  .voltab-block .power  { color: var(--line); font-size: 14px; letter-spacing: 0.08em; font-weight: 500; display: block; margin-top: 9px; }
+  .auto-block { position: absolute; left: 0; right: 0; top: 14px; text-align: center; line-height: 1; }
+  .auto-block .label { color: var(--text); font-size: 18px; font-weight: 500; letter-spacing: 0.06em; display: block; }
+  .auto-block .value { color: var(--text); font-size: 16px; letter-spacing: 0.02em; display: block; margin-top: 7px; }
 
-    body {
-      background: #060810;
-      min-height: 100vh;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      padding: 40px 20px 60px;
-      gap: 28px;
-      font-family: 'Montserrat', sans-serif;
-    }
+  /* FIX V3.1(1): centrato verticalmente nel topbar (top:0; height:58px) */
+  .carica {
+    position: absolute; right: 22px; top: 0; height: 58px;
+    display: flex; align-items: center; gap: 6px; line-height: 1;
+  }
+  .carica .dot {
+    width: 10px; height: 10px; border-radius: 50%;
+    background: var(--dot); box-shadow: 0 0 6px var(--dot-glow);
+    transition: background-color 350ms ease;
+  }
+  .carica .label { color: var(--carica); font-size: 16px; letter-spacing: 0.04em; transition: color 350ms ease; }
 
-    /* ─── Display frame 480×480 ─── */
-    #display {
-      width: 480px;
-      height: 480px;
-      background: var(--bg);
-      position: relative;
-      overflow: hidden;
-      box-shadow:
-        0 0 0 1px #181d28,
-        0 8px 60px rgba(0,0,0,0.95),
-        0 0 50px rgba(34,197,200,0.06);
-      flex-shrink: 0;
-    }
-    #display * { font-family: 'Montserrat', sans-serif; }
+  .stage { position: absolute; left: 0; top: 78.5px; right: 0; bottom: 90px; }
+  .scale-100, .scale-0 { position: absolute; color: var(--line); font-size: 10px; font-weight: 500; letter-spacing: 0.05em; line-height: 1; }
+  .scale-100 { left: 226px; top: 30px; }
+  .scale-0   { left: 232px; top: 268.5px; }
+  .center-text { position: absolute; left: 0; right: 0; top: 80px; text-align: center; line-height: 1; z-index: 5; pointer-events: none; }
+  .center-text .num { color: var(--accent-2); font-size: 40px; letter-spacing: 0.02em; display: block; transition: color 350ms ease; }
+  .center-text .pct { color: var(--accent-2); font-size: 30px; display: block; margin-top: 12px; }
+  .mono { position: absolute; left: 0; top: 0; width: 480px; height: 311.5px; }
 
-    /* ─── TOP BAR (h=58, bottom border) ─── */
-    #top-bar {
-      position: absolute;
-      left: 0; top: 0;
-      width: 480px; height: 58px;
-      border-bottom: 1px solid var(--border);
-    }
+  .powerrow {
+    position: absolute; left: 0; right: 0; bottom: 0; height: 90px;
+    display: flex; flex-direction: row; align-items: center; justify-content: space-around;
+    padding: 0 16px; box-sizing: border-box;
+  }
+  .pcell { flex: 1 1 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; line-height: 1; }
+  .pcell .linea { color: var(--text); font-size: 15px; letter-spacing: 0.04em; }
+  .pcell .bar   { width: 78px; height: 1px; background: var(--line); }
+  .pcell .val   { color: var(--accent-2); font-size: 18px; letter-spacing: 0.02em; font-weight: 500; }
+  .pcell .unit  { color: var(--line); font-size: 15px; letter-spacing: 0.04em; }
 
-    /* Left: brand */
-    #brand-col {
-      position: absolute;
-      left: 20px; top: 50%;
-      transform: translateY(-50%);
-      display: flex;
-      align-items: baseline;
-      gap: 5px;
-    }
-    .t-brand { font-size: 14px; font-weight: 600; color: var(--accent); letter-spacing: 1.5px; }
-    .t-power { font-size: 14px; font-weight: 500; color: var(--vdim);   letter-spacing: 1.5px; }
-
-    /* Center: autonomia */
-    #time-col {
-      position: absolute;
-      left: 50%; top: 50%;
-      transform: translate(-50%, -50%);
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      gap: 1px;
-    }
-    .t-auto-title { font-size: 14px; font-weight: 500; color: var(--dim);  letter-spacing: 1px; }
-    #time-value   { font-size: 20px; font-weight: 600; color: var(--w88);  letter-spacing: 0.3px; }
-
-    /* Right: status */
-    #status-row {
-      position: absolute;
-      right: 20px; top: 50%;
-      transform: translateY(-50%);
-      display: flex;
-      align-items: center;
-      gap: 6px;
-    }
-    #status-dot {
-      width: 10px; height: 10px;
-      border-radius: 50%;
-      background: var(--dim);
-      flex-shrink: 0;
-      transition: background 0.3s;
-    }
-    #status-dot.pulse { animation: blink 2s ease-in-out infinite; }
-    @keyframes blink { 0%,100%{opacity:1} 50%{opacity:.35} }
-    #status-text {
-      font-size: 14px; font-weight: 500;
-      color: var(--dim);
-      letter-spacing: 0.5px;
-      transition: color 0.3s;
-    }
-
-    /* ─── SVG overlay (arc gauge) ─── */
-    #arc-svg {
-      position: absolute;
-      left: 0; top: 0;
-      width: 480px; height: 480px;
-      pointer-events: none;
-    }
-
-    /* ─── Center text (at arc center 240,236) ─── */
-    #center-col {
-      position: absolute;
-      left: 240px;
-      top: 236px;
-      transform: translate(-50%, -50%);
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      gap: 4px;
-      pointer-events: none;
-    }
-    #soc-value {
-      font-size: 48px; font-weight: 700;
-      color: var(--accent);
-      line-height: 1;
-      transition: color 0.3s;
-    }
-    #soc-pct {
-      font-size: 28px; font-weight: 600;
-      color: var(--dim);
-      line-height: 1;
-    }
-
-    /* ─── Arc edge labels (LVGL pixel coords) ─── */
-    .arc-lbl {
-      position: absolute;
-      top: 342px;
-      font-size: 14px; font-weight: 500;
-      color: var(--vdim);
-    }
-    #lbl-0   { left: 113px; }
-    #lbl-100 { left: 340px; }
-
-    /* ─── Horizontal divider ─── */
-    #h-div {
-      position: absolute;
-      left: 20px; top: 369px;
-      width: 440px; height: 1px;
-      background: var(--divider);
-    }
-
-    /* ─── Power row (y=370, h=90) ─── */
-    #power-row {
-      position: absolute;
-      left: 0; top: 370px;
-      width: 480px; height: 90px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      padding: 0 16px;
-    }
-    .power-col {
-      flex: 1;
-      height: 90px;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      gap: 2px;
-    }
-    .vsep { width: 1px; height: 50px; background: var(--divider); flex-shrink: 0; }
-    .ln-title { font-size: 14px; font-weight: 500; color: var(--dim);  letter-spacing: 0.5px; }
-    .ln-value { font-size: 20px; font-weight: 600; color: var(--teal); transition: color .2s; }
-    .ln-unit  { font-size: 14px; font-weight: 400; color: var(--vdim); }
-
-    /* ─── WiFi bar (y=460, h=20, top border) ─── */
-    #wifi-bar {
-      position: absolute;
-      left: 0; top: 460px;
-      width: 480px; height: 20px;
-      border-top: 1px solid var(--border);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-    }
-    #wifi-text {
-      font-size: 13px; font-weight: 400;
-      color: var(--vdim);
-      letter-spacing: 0.2px;
-      transition: color .3s;
-    }
-
-    /* ─── Controls panel ─── */
-    .controls {
-      width: 480px;
-      background: #0C1118;
-      border: 1px solid #1A2030;
-      border-radius: 6px;
-      padding: 20px;
-    }
-    .controls h3 {
-      font-size: 10px; font-weight: 700;
-      color: var(--accent);
-      letter-spacing: 2.5px;
-      text-transform: uppercase;
-      margin-bottom: 18px;
-    }
-    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px 24px; }
-    .full { grid-column: 1/-1; }
-    .ci { display: flex; flex-direction: column; gap: 6px; }
-    .ci label {
-      font-size: 10px; font-weight: 600;
-      color: var(--dim);
-      text-transform: uppercase;
-      letter-spacing: 0.8px;
-    }
-    .ci .vd {
-      font-size: 13px; font-weight: 600;
-      color: var(--w88);
-    }
-    input[type=range] {
-      width: 100%; height: 3px;
-      accent-color: var(--accent);
-      cursor: pointer;
-    }
-    select, input[type=number] {
-      background: var(--bg);
-      color: var(--w88);
-      border: 1px solid #1A2030;
-      border-radius: 4px;
-      padding: 6px 9px;
-      font-family: 'Montserrat', sans-serif;
-      font-size: 12px; font-weight: 500;
-      width: 100%;
-      outline: none;
-    }
-    select:focus, input:focus { border-color: var(--accent); }
-  </style>
+  /* Tweaks panel */
+  .tweaks {
+    position: fixed; right: 24px; bottom: 24px; width: 260px;
+    background: rgba(14,18,28,0.95); backdrop-filter: blur(14px);
+    border: 1px solid #1F2636; border-radius: 14px;
+    font-family: 'JetBrains Mono', monospace; font-size: 12px;
+    color: #FDFBF2; z-index: 1000; overflow: hidden;
+  }
+  .tw-head {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 10px 14px; border-bottom: 1px solid #1F2636;
+  }
+  .tw-head .title { font-family: 'Orbitron', sans-serif; font-size: 10px; letter-spacing: 0.16em; color: #D2F68C; }
+  .tw-body { padding: 14px; display: flex; flex-direction: column; gap: 14px; }
+  .tw-group { display: flex; flex-direction: column; gap: 6px; }
+  .tw-lbl { font-family: 'Orbitron', sans-serif; font-size: 9px; letter-spacing: 0.18em; color: #6B7385; text-transform: uppercase; }
+  .tw-row { display: flex; gap: 6px; align-items: center; }
+  .tw-row label { font-size: 11px; color: #9CA3AF; white-space: nowrap; }
+  input[type=range] { flex: 1; accent-color: #D2F68C; }
+  .tw-val { width: 30px; text-align: right; color: #D2F68C; font-size: 11px; }
+  .tw-opts { display: flex; gap: 6px; flex-wrap: wrap; }
+  .tw-btn {
+    flex: 1 1 auto; padding: 7px 6px; border-radius: 8px; cursor: pointer;
+    background: rgba(255,255,255,0.02); border: 1px solid #232A3B;
+    color: #B6BCCB; font-family: 'JetBrains Mono', monospace; font-size: 11px;
+    text-align: center; transition: all 180ms ease;
+  }
+  .tw-btn:hover { color: #FDFBF2; border-color: #344158; }
+  .tw-btn.active { background: rgba(210,246,140,0.10); border-color: #6F8540; color: #D2F68C; }
+</style>
 </head>
 <body>
 
-<!-- ═══════════ DISPLAY 480×480 ═══════════ -->
-<div id="display">
+<div class="frame">
+  <div class="wifi" id="t-wifi">Connesso al Wifi&nbsp;|&nbsp;192.168.1.50</div>
+  <div class="row-divider div-top"></div>
 
-  <!-- TOP BAR -->
-  <div id="top-bar">
-    <div id="brand-col">
-      <span class="t-brand">REEFILLA</span>
-      <span class="t-power">POWER</span>
+  <div class="topbar">
+    <div class="voltab-block">
+      <span class="voltab">VOLTAB</span>
+      <span class="power">POWER</span>
     </div>
-    <div id="time-col">
-      <span class="t-auto-title">AUTONOMIA</span>
-      <span id="time-value">---</span>
+    <div class="auto-block">
+      <span class="label">AUTONOMIA</span>
+      <span class="value" id="t-autonomy">1h 30min.</span>
     </div>
-    <div id="status-row">
-      <div id="status-dot"></div>
-      <span id="status-text">---</span>
-    </div>
-  </div>
-
-  <!-- ARC GAUGE SVG
-       Arc center: (240, 236)  |  r=123  |  start=120°  |  span=300° clockwise
-       Gap (60°) at bottom between ~60° and ~120°  -->
-  <svg id="arc-svg" viewBox="0 0 480 480" xmlns="http://www.w3.org/2000/svg">
-    <!-- glow behind fill (very subtle) -->
-    <path id="arc-glow" fill="none"
-          stroke="#22C5C8" stroke-width="24" stroke-linecap="round"
-          opacity="0.07" d=""/>
-    <!-- background track -->
-    <path id="arc-bg" fill="none"
-          stroke="#1C212C" stroke-width="14" stroke-linecap="round"
-          d="M 178.50 342.50 A 123 123 0 1 1 301.50 342.50"/>
-    <!-- foreground fill (dynamic) -->
-    <path id="arc-fg" fill="none"
-          stroke="#22C5C8" stroke-width="14" stroke-linecap="round"
-          d=""/>
-  </svg>
-
-  <!-- CENTER TEXT -->
-  <div id="center-col">
-    <span id="soc-value">---</span>
-    <span id="soc-pct">%</span>
-  </div>
-
-  <!-- ARC EDGE LABELS -->
-  <span class="arc-lbl" id="lbl-0">0%</span>
-  <span class="arc-lbl" id="lbl-100">100%</span>
-
-  <!-- HORIZONTAL DIVIDER -->
-  <div id="h-div"></div>
-
-  <!-- POWER ROW -->
-  <div id="power-row">
-    <div class="power-col" id="col-0">
-      <span class="ln-title">LINEA 1</span>
-      <span class="ln-value" id="val-0">---</span>
-      <span class="ln-unit">W</span>
-    </div>
-    <div class="vsep" id="vsep-0"></div>
-    <div class="power-col" id="col-1">
-      <span class="ln-title">LINEA 2</span>
-      <span class="ln-value" id="val-1">---</span>
-      <span class="ln-unit">W</span>
-    </div>
-    <div class="vsep" id="vsep-1"></div>
-    <div class="power-col" id="col-2">
-      <span class="ln-title">LINEA 3</span>
-      <span class="ln-value" id="val-2">---</span>
-      <span class="ln-unit">W</span>
+    <div class="carica">
+      <span class="dot" id="t-dot"></span>
+      <span class="label" id="t-carica">CARICA</span>
     </div>
   </div>
 
-  <!-- WIFI BAR -->
-  <div id="wifi-bar">
-    <span id="wifi-text">WiFi: ---</span>
+  <div class="row-divider div-mid"></div>
+
+  <div class="stage">
+    <div class="scale-100">100%</div>
+    <div class="scale-0">0%</div>
+
+    <svg class="mono" viewBox="0 0 480 311.5" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+      <defs>
+        <!-- Gradiente SOC: sale dal basso in proporzione alla carica -->
+        <linearGradient id="vFill" x1="240" y1="46" x2="240" y2="259.7" gradientUnits="userSpaceOnUse">
+          <stop offset="0"    stop-color="#252C3B" id="vf-0"/>
+          <stop offset="0.78" stop-color="#252C3B" id="vf-1"/>
+          <stop offset="0.92" stop-color="#D2F68C" id="vf-2"/>
+          <stop offset="1"    stop-color="#D2F68C" id="vf-3"/>
+        </linearGradient>
+      </defs>
+      <path d="M 142.77 46 L 96 46 L 220.769 259.7 L 256.738 259.7 L 266.18 259.7 L 242.927 219.628 L 142.77 46 Z" fill="url(#vFill)"/>
+      <path d="M 336.763 46 L 285.989 135.069 L 303.265 135.069 L 253.876 220.608 L 253.75 220.826 L 359.931 125.834 L 337.664 125.834 L 383.52 46.003 L 336.76 46 Z" fill="url(#vFill)"/>
+      <path d="M 303.514 135 L 348 136.662 L 254 220.756 L 254.125 220.539 L 303.514 135 Z" fill="url(#vFill)"/>
+      <path d="M 207 157 L 161 157 L 192 210 L 220.5 259 L 235.006 259 L 239.5 259 L 266 259 L 252.5 236.5 L 207 157 Z" fill="url(#vFill)"/>
+    </svg>
+
+    <div class="center-text">
+      <span class="num" id="t-pct">20</span>
+      <span class="pct">%</span>
+    </div>
   </div>
 
-</div><!-- /display -->
-
-<!-- ═══════════ CONTROLS ═══════════ -->
-<div class="controls">
-  <h3>Simulatore display</h3>
-  <div class="grid">
-
-    <div class="ci full">
-      <label>SOC — <span id="soc-lbl" style="color:var(--accent);font-weight:700;">75</span>%</label>
-      <input type="range" id="c-soc" min="0" max="100" value="75">
+  <div class="powerrow">
+    <div class="pcell">
+      <span class="linea">Linea 1</span><span class="bar"></span>
+      <span class="val" id="t-l1">+1200</span><span class="unit">W</span>
     </div>
-
-    <div class="ci full">
-      <label>Stato sistema (main_state)</label>
-      <select id="c-state">
-        <option value="-1">--- (nessun dato CAN)</option>
-        <option value="0">0 – INIT</option>
-        <option value="1">1 – ALIGN</option>
-        <option value="2">2 – STANDBY</option>
-        <option value="3" selected>3 – CARICA</option>
-        <option value="4">4 – SCARICA</option>
-        <option value="5">5 – SCARICA ON-GRID</option>
-        <option value="90">90 – WARNING</option>
-        <option value="99">99 – ERRORE</option>
-      </select>
+    <div class="pcell">
+      <span class="linea">Linea 2</span><span class="bar"></span>
+      <span class="val" id="t-l2">-850</span><span class="unit">W</span>
     </div>
-
-    <div class="ci">
-      <label>Autonomia (minuti)</label>
-      <input type="number" id="c-time" value="90" min="0" max="9999">
+    <div class="pcell">
+      <span class="linea">Linea 3</span><span class="bar"></span>
+      <span class="val" id="t-l3">+430</span><span class="unit">W</span>
     </div>
-
-    <div class="ci">
-      <label>Inverter attivi (inv_count)</label>
-      <select id="c-inv">
-        <option value="0">0 – nessuno</option>
-        <option value="1">1</option>
-        <option value="2">2</option>
-        <option value="3" selected>3</option>
-      </select>
-    </div>
-
-    <div class="ci">
-      <label>Potenza linea 1 (W)</label>
-      <input type="number" id="c-p0" value="1200">
-    </div>
-    <div class="ci">
-      <label>Potenza linea 2 (W)</label>
-      <input type="number" id="c-p1" value="-850">
-    </div>
-    <div class="ci">
-      <label>Potenza linea 3 (W)</label>
-      <input type="number" id="c-p2" value="430">
-    </div>
-
-    <div class="ci">
-      <label>WiFi</label>
-      <select id="c-wifi">
-        <option value="none">--- (nessun dato)</option>
-        <option value="disconnected">Non connesso</option>
-        <option value="connected" selected>Connesso – 192.168.1.50</option>
-      </select>
-    </div>
-
   </div>
 </div>
 
+<!-- Pannello tweaks semplificato -->
+<aside class="tweaks">
+  <div class="tw-head"><span class="title">TWEAKS · V3.1 (1)</span></div>
+  <div class="tw-body">
+    <div class="tw-group">
+      <div class="tw-lbl">SOC %</div>
+      <div class="tw-row">
+        <input type="range" id="sl-soc" min="0" max="100" value="20"/>
+        <span class="tw-val" id="sl-soc-val">20%</span>
+      </div>
+    </div>
+    <div class="tw-group">
+      <div class="tw-lbl">Stato</div>
+      <div class="tw-opts" id="tw-state"></div>
+    </div>
+  </div>
+</aside>
+
 <script>
-// ── Palette ──────────────────────────────────────────
-const C = {
-  accent: '#22C5C8', green:  '#4ADE80', yellow: '#F0B429',
-  red:    '#EF4444', teal:   '#22D3EE', w88:    '#E0E0E0',
-  dim:    '#636873', vdim:   '#3D424D',
-};
+(() => {
+  const LOW = 20;
+  const LOW_TIP  = '#EF4444';
+  const LOW_BASE = '#3A1417';
 
-// ── Arc geometry ─────────────────────────────────────
-// LVGL: center=(240,236), ARC_SZ=260, ARC_W=14 → r≈123
-// rotation=120°, bg_angles(0,300) → clockwise 300° arc, 60° gap at bottom
-const ARC = { cx: 240, cy: 236, r: 123, s: 120, span: 300 };
-
-const toRad = d => d * Math.PI / 180;
-
-function pt(deg) {
-  return [
-    ARC.cx + ARC.r * Math.cos(toRad(deg)),
-    ARC.cy + ARC.r * Math.sin(toRad(deg))
-  ];
-}
-
-function arcPath(startDeg, spanDeg) {
-  if (spanDeg <= 0) return '';
-  if (spanDeg >= 360) spanDeg = 359.9;
-  const [sx, sy] = pt(startDeg);
-  const [ex, ey] = pt(startDeg + spanDeg);
-  const large = spanDeg > 180 ? 1 : 0;
-  return `M ${sx.toFixed(2)} ${sy.toFixed(2)} A ${ARC.r} ${ARC.r} 0 ${large} 1 ${ex.toFixed(2)} ${ey.toFixed(2)}`;
-}
-
-// SOC → arc color (mirrors soc_color() in ui_main.cpp)
-function socColor(soc) {
-  if (soc > 60) return C.green;
-  if (soc > 25) return C.yellow;
-  return C.red;
-}
-
-// main_state → { color, label } (mirrors state_info() in ui_main.cpp)
-function stateInfo(s) {
-  const map = {
-     0: [C.dim,    'INIT'],
-     1: [C.dim,    'ALIGN'],
-     2: [C.teal,   'STANDBY'],
-     3: [C.green,  'CARICA'],
-     4: [C.teal,   'SCARICA'],
-     5: [C.teal,   'SCARICA ON-GRID'],
-    90: [C.yellow, 'WARNING'],
-    99: [C.red,    'ERRORE'],
+  const STATES = {
+    carica:  { label:"Carica",   autonomy:"1h 30min.", carica:"CARICA",  dot:"#6666C5", caricaCol:"#D2F68C", pctCol:"#6666C5" },
+    scarica: { label:"Scarica",  autonomy:"4h 12min.", carica:"SCARICA", dot:"#6666C5", caricaCol:"#6666C5", pctCol:"#6666C5" },
+    standby: { label:"Stand-by", autonomy:"Stand-by",  carica:"STANDBY", dot:"#252C3B", caricaCol:"#252C3B", pctCol:"#6666C5" },
   };
-  return map[s] ?? [C.dim, '---'];
-}
 
-// time_to_* display (mirrors pick_time_min() formatting)
-function fmtTime(min) {
-  if (!min || min <= 0) return '---';
-  if (min > 16 * 60)   return '>16h';
-  const h = Math.floor(min / 60);
-  const m = min % 60;
-  return h > 0 ? `${h}h ${String(m).padStart(2,'0')}m` : `${m}m`;
-}
+  let curState = 'carica';
 
-// ── Render ────────────────────────────────────────────
-function render() {
-  const soc      = parseInt(document.getElementById('c-soc').value);
-  const stateRaw = parseInt(document.getElementById('c-state').value);
-  const timeMins = parseInt(document.getElementById('c-time').value) || 0;
-  const invCount = parseInt(document.getElementById('c-inv').value);
-  const powers   = [0,1,2].map(i => parseInt(document.getElementById(`c-p${i}`).value) || 0);
-  const wifi     = document.getElementById('c-wifi').value;
-  const hasData  = stateRaw !== -1;
-
-  document.getElementById('soc-lbl').textContent = soc;
-
-  // ── Arc fill ──
-  const arcCol   = hasData ? socColor(soc) : C.accent;
-  const fillPath = (!hasData || soc === 0)
-    ? ''
-    : arcPath(ARC.s, soc * ARC.span / 100);
-
-  document.getElementById('arc-fg').setAttribute('stroke', arcCol);
-  document.getElementById('arc-fg').setAttribute('d', fillPath);
-  document.getElementById('arc-glow').setAttribute('stroke', arcCol);
-  document.getElementById('arc-glow').setAttribute('d', fillPath);
-
-  // ── SOC text ──
-  const socEl = document.getElementById('soc-value');
-  socEl.textContent  = hasData ? String(soc) : '---';
-  socEl.style.color  = arcCol;
-
-  // ── Status dot + label ──
-  const [siColor, siLabel] = hasData ? stateInfo(stateRaw) : [C.dim, '---'];
-  const dot = document.getElementById('status-dot');
-  dot.style.background = siColor;
-  dot.classList.toggle('pulse', hasData && [3,4,5].includes(stateRaw));
-  document.getElementById('status-text').style.color   = siColor;
-  document.getElementById('status-text').textContent   = siLabel;
-
-  // ── Autonomia ──
-  document.getElementById('time-value').textContent = hasData ? fmtTime(timeMins) : '---';
-
-  // ── Power columns (col_valid[i] = i < inv_count) ──
-  for (let i = 0; i < 3; i++) {
-    const col = document.getElementById(`col-${i}`);
-    const vis = i < invCount;
-    col.style.display = vis ? 'flex' : 'none';
-    if (vis) {
-      const w  = powers[i];
-      const vEl = document.getElementById(`val-${i}`);
-      vEl.textContent = w >= 0 ? `+${w}` : `${w}`;
-      vEl.style.color = w < 0 ? C.teal : C.green;
-    }
+  function updateFill(soc) {
+    const isLow    = soc < LOW;
+    const baseCol  = isLow ? LOW_BASE : '#252C3B';
+    const tipCol   = isLow ? LOW_TIP  : '#D2F68C';
+    const level    = 1 - soc / 100;
+    const band     = 0.14;
+    const s1 = Math.max(0, Math.min(1, level - band * 0.2)).toFixed(3);
+    const s2 = Math.max(0, Math.min(1, level + band * 0.8)).toFixed(3);
+    document.getElementById('vf-0').setAttribute('stop-color', baseCol);
+    document.getElementById('vf-1').setAttribute('stop-color', baseCol);
+    document.getElementById('vf-2').setAttribute('stop-color', tipCol);
+    document.getElementById('vf-3').setAttribute('stop-color', tipCol);
+    document.getElementById('vf-1').setAttribute('offset', s1);
+    document.getElementById('vf-2').setAttribute('offset', s2);
+    const pctNum = document.getElementById('t-pct');
+    const pctSym = document.querySelector('.center-text .pct');
+    const pCol = isLow ? LOW_TIP : STATES[curState].pctCol;
+    pctNum.style.color = pCol;
+    pctSym.style.color = pCol;
+    pctNum.textContent = String(soc);
   }
-  // vsep-0: visible if col-0 AND col-1 present
-  document.getElementById('vsep-0').style.display = invCount >= 2 ? 'block' : 'none';
-  // vsep-1: visible if col-2 present and at least one to the left
-  document.getElementById('vsep-1').style.display = invCount >= 3 ? 'block' : 'none';
 
-  // ── WiFi bar ──
-  const wEl = document.getElementById('wifi-text');
-  if (wifi === 'none') {
-    wEl.textContent = 'WiFi: ---';
-    wEl.style.color = C.vdim;
-  } else if (wifi === 'disconnected') {
-    wEl.textContent = 'WiFi: non connesso';
-    wEl.style.color = C.dim;
-  } else {
-    wEl.textContent = 'Connesso al WiFi  |  192.168.1.50';
-    wEl.style.color = C.accent;
+  function applyState(key) {
+    curState = key;
+    const s = STATES[key];
+    document.getElementById('t-autonomy').textContent = s.autonomy;
+    document.getElementById('t-carica').textContent   = s.carica;
+    document.getElementById('t-carica').style.color   = s.caricaCol;
+    document.getElementById('t-dot').style.background = s.dot;
+    document.documentElement.style.setProperty('--dot', s.dot);
+    document.documentElement.style.setProperty('--carica', s.caricaCol);
+    updateFill(parseInt(document.getElementById('sl-soc').value));
+    renderStateButtons();
   }
-}
 
-document.querySelectorAll('input,select').forEach(el => el.addEventListener('input', render));
-render();
+  function renderStateButtons() {
+    const wrap = document.getElementById('tw-state');
+    wrap.innerHTML = '';
+    Object.entries(STATES).forEach(([k, s]) => {
+      const b = document.createElement('button');
+      b.className = 'tw-btn' + (curState === k ? ' active' : '');
+      b.textContent = s.label;
+      b.onclick = () => applyState(k);
+      wrap.appendChild(b);
+    });
+  }
+
+  document.getElementById('sl-soc').addEventListener('input', e => {
+    const v = parseInt(e.target.value);
+    document.getElementById('sl-soc-val').textContent = v + '%';
+    updateFill(v);
+  });
+
+  renderStateButtons();
+  updateFill(20);
+})();
 </script>
 </body>
 </html>

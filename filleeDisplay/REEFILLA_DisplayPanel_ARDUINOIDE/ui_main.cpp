@@ -3,6 +3,7 @@
 #include <ctype.h>
 #include <limits.h>
 #include <string.h>
+#include <esp_heap_caps.h>
 
 #include "ui_main.h"
 #include "dbc_decoder.h"
@@ -12,79 +13,92 @@ LV_FONT_DECLARE(font_orbitron_20);
 LV_FONT_DECLARE(font_orbitron_28);
 LV_FONT_DECLARE(font_orbitron_48);
 
-// ── Palette ────────────────────────────────────────────────────────────────
-#define CLR_BG          0x0A0F1A
-#define CLR_ACCENT      0x22C5C8  // oklch(0.75 0.18 193) ≈ teal
-#define CLR_TRACK       0x1C212C  // rgba(255,255,255,0.07) on BG
-#define CLR_BORDER      0x14181F  // rgba(255,255,255,0.05) on BG
-#define CLR_DIVIDER     0x1A2030  // rgba(255,255,255,0.08) on BG
-#define CLR_GREEN       0x4ADE80  // oklch(0.75 0.2 145)
-#define CLR_YELLOW      0xF0B429  // oklch(0.78 0.18 60)
-#define CLR_RED         0xEF4444  // oklch(0.65 0.22 25)
-#define CLR_TEAL        0x22D3EE  // discharging teal
-#define CLR_WHITE_88    0xE0E0E0  // rgba(255,255,255,0.88)
-#define CLR_TEXT_DIM    0x636873  // rgba(255,255,255,0.35)
-#define CLR_TEXT_VDIM   0x3D424D  // rgba(255,255,255,0.20)
-#define CLR_WARM        0xC4A460  // oklch(0.75 0.12 60) — temperature
-#define CLR_LIME        0xD2F68C  // brand / values accent
-#define CLR_PURPLE      0x6666C5  // arc charged / wifi
+// ── Palette ──────────────────────────────────────────────────────────────────
+#define CLR_BG       0x0A0F1A
+#define CLR_DIM      0x252C3B
+#define CLR_PURPLE   0x6666C5
+#define CLR_LIME     0xD2F68C
+#define CLR_WHITE    0xFDFBF2
+#define CLR_YELLOW   0xF0B429
+#define CLR_RED      0xEF4444
+#define CLR_TEAL     0x22D3EE
+#define CLR_TEXT_DIM 0x636873
 
-// ── LVGL objects ───────────────────────────────────────────────────────────
+// ── Layout ───────────────────────────────────────────────────────────────────
+// WiFi bar :  y=  0, h=20
+// Divider  :  y= 20, h= 1
+// Top bar  :  y= 21, h=57  (→ y=78)
+// Divider  :  y= 78, h= 1
+// Stage    :  y= 79, h=311 (→ y=390)
+// Power row:  y=390, h=90  (→ y=480)
+static constexpr lv_coord_t Y_TOPBAR   =  21;
+static constexpr lv_coord_t H_TOPBAR   =  57;
+static constexpr lv_coord_t Y_STAGE    =  79;
+static constexpr lv_coord_t H_STAGE    = 311;
+static constexpr lv_coord_t Y_POWERROW = 390;
+static constexpr lv_coord_t H_POWERROW =  90;
 
-// Top bar
-static lv_obj_t *label_brand        = nullptr;
-static lv_obj_t *label_auto_title   = nullptr;
-static lv_obj_t *label_time_value   = nullptr;
-static lv_obj_t *dot_status         = nullptr;
-static lv_obj_t *label_status_text  = nullptr;
+// ── V monogram – geometria in canvas coords ───────────────────────────────────
+// Coordinate derivate dal file REEFILLA_Display_Preview.html (viewBox 0 0 480 311.5).
+// Gradiente verticale: top della V = y_V_TOP, bottom = y_V_BOT
+static constexpr lv_coord_t y_V_TOP =  46;
+static constexpr lv_coord_t y_V_BOT = 260;
 
-// Arc gauge
-static lv_obj_t *soc_arc_bg         = nullptr;
-static lv_obj_t *soc_arc_fg         = nullptr;
-
-// Center text
-static lv_obj_t *label_soc_value    = nullptr;
-static lv_obj_t *label_soc_sub      = nullptr;  // "PERCENTUALE"
-
-// Arc edge labels
-static lv_obj_t *label_arc_start    = nullptr;  // "0%"
-static lv_obj_t *label_arc_end      = nullptr;  // "100%"
-
-// Power lines (3 columns)
+// ── Oggetti LVGL ─────────────────────────────────────────────────────────────
+static lv_obj_t *label_wifi          = nullptr;
+static lv_obj_t *label_auto_title    = nullptr;
+static lv_obj_t *label_time_value    = nullptr;
+static lv_obj_t *dot_status          = nullptr;
+static lv_obj_t *label_status_text   = nullptr;
+static lv_obj_t *mono_canvas         = nullptr;
+static uint8_t  *canvas_buf          = nullptr;
+static lv_obj_t *label_soc_value     = nullptr;
+static lv_obj_t *label_soc_pct       = nullptr;
 static lv_obj_t *label_line_title[3] = {};
 static lv_obj_t *label_line_value[3] = {};
 static lv_obj_t *label_line_unit[3]  = {};
-static lv_obj_t *col_obj[3]          = {};   // column containers (for show/hide)
-static lv_obj_t *vsep_obj[2]         = {};   // vertical separators between columns
+static lv_obj_t *col_obj[3]          = {};
+static lv_obj_t *vsep_obj[2]         = {};
 
-// Bottom bar
-static lv_obj_t *label_wifi          = nullptr;
+// SOC dell'ultimo disegno del canvas (255 = mai disegnato)
+static uint8_t g_last_drawn_soc = 255;
 
-// ── Sentinel values ─────────────────────────────────────────────────────────
-static constexpr uint16_t TIME_INVALID = 0;   // 0 = non calcolabile (spec DBC)
+// ── Sentinelle ───────────────────────────────────────────────────────────────
+static constexpr uint16_t TIME_INVALID = 0;
 static const char        *DASHES       = "---";
 
-// ── Helpers ──────────────────────────────────────────────────────────────────
+// ── Helpers logica ───────────────────────────────────────────────────────────
 
 static lv_color_t soc_color(uint8_t pct)
 {
-    if (pct > 25) return lv_color_hex(CLR_PURPLE);
-    return lv_color_hex(CLR_RED);
+    return (pct > 20) ? lv_color_hex(CLR_PURPLE) : lv_color_hex(CLR_RED);
 }
 
-struct StatusInfo { lv_color_t color; const char *label; };
+// StatusInfo con colori separati per dot e label (come nel design HTML V3.1)
+struct StatusInfo {
+    lv_color_t dot_color;
+    lv_color_t label_color;
+    const char *label;
+};
+
 static StatusInfo state_info(int16_t state)
 {
+    // Mapping dal design HTML:
+    //   carica  → dot=accent2(purple), label=accent(lime)
+    //   scarica → dot=accent2(purple), label=accent2(purple)
+    //   standby → dot=dim,             label=dim
+    //   warning → dot=yellow,          label=yellow
+    //   errore  → dot=red,             label=red
     switch (state) {
-        case 0:  return { lv_color_hex(CLR_TEXT_DIM), "INIT"     };
-        case 1:  return { lv_color_hex(CLR_TEXT_DIM), "ALIGN"    };
-        case 2:  return { lv_color_hex(CLR_TEAL),     "STANDBY"  };
-        case 3:  return { lv_color_hex(CLR_GREEN),    "CARICA"   };
-        case 4:  return { lv_color_hex(CLR_TEAL),     "SCARICA"  };
-        case 5:  return { lv_color_hex(CLR_TEAL),     "SCARICA ON-GRID" };
-        case 90: return { lv_color_hex(CLR_YELLOW),   "WARNING"  };
-        case 99: return { lv_color_hex(CLR_RED),      "ERRORE"   };
-        default: return { lv_color_hex(CLR_TEXT_DIM), "---"      };
+        case 0:  return { lv_color_hex(CLR_TEXT_DIM), lv_color_hex(CLR_TEXT_DIM), "INIT"            };
+        case 1:  return { lv_color_hex(CLR_TEXT_DIM), lv_color_hex(CLR_TEXT_DIM), "ALIGN"           };
+        case 2:  return { lv_color_hex(CLR_TEXT_DIM), lv_color_hex(CLR_TEXT_DIM), "STANDBY"         };
+        case 3:  return { lv_color_hex(CLR_PURPLE),   lv_color_hex(CLR_LIME),     "CARICA"          };
+        case 4:  return { lv_color_hex(CLR_PURPLE),   lv_color_hex(CLR_PURPLE),   "SCARICA"         };
+        case 5:  return { lv_color_hex(CLR_PURPLE),   lv_color_hex(CLR_PURPLE),   "SCARICA ON-GRID" };
+        case 90: return { lv_color_hex(CLR_YELLOW),   lv_color_hex(CLR_YELLOW),   "WARNING"         };
+        case 99: return { lv_color_hex(CLR_RED),      lv_color_hex(CLR_RED),      "ERRORE"          };
+        default: return { lv_color_hex(CLR_TEXT_DIM), lv_color_hex(CLR_TEXT_DIM), "---"             };
     }
 }
 
@@ -93,11 +107,116 @@ static uint16_t pick_time_min(const DbcState &s, bool status_valid)
     if (!status_valid) return TIME_INVALID;
     const bool ttf = s.time_to_full_min  != 0;
     const bool tte = s.time_to_empty_min != 0;
-    if (s.main_state == 3 && ttf) return s.time_to_full_min;   // RUN_CHARGING
-    if ((s.main_state == 4 || s.main_state == 5) && tte) return s.time_to_empty_min; // RUN_DISCHARGING / ONGRID
+    if (s.main_state == 3 && ttf) return s.time_to_full_min;
+    if ((s.main_state == 4 || s.main_state == 5) && tte) return s.time_to_empty_min;
     if (tte) return s.time_to_empty_min;
     if (ttf) return s.time_to_full_min;
     return TIME_INVALID;
+}
+
+// ── Polygon clipping (Sutherland-Hodgman, halfplane inferiore) ───────────────
+// Taglia il poligono a y >= y_min (porzione "lit"). Buffer out: n+1 punti max.
+
+static int clip_poly_lower(const lv_point_t *in, int n,
+                             lv_point_t *out, lv_coord_t y_min)
+{
+    // Tieni i punti con y >= y_min (metà inferiore – la parte "lit")
+    int m = 0;
+    for (int i = 0; i < n; ++i) {
+        const lv_point_t a = in[i];
+        const lv_point_t b = in[(i + 1) % n];
+        const bool a_in = (a.y >= y_min);
+        const bool b_in = (b.y >= y_min);
+        if (a_in) out[m++] = a;
+        if (a_in != b_in) {
+            const int32_t dy = (int32_t)b.y - a.y;
+            if (dy != 0) {
+                lv_point_t p;
+                p.y = y_min;
+                p.x = (lv_coord_t)(a.x + (int32_t)(y_min - a.y) * (b.x - a.x) / dy);
+                out[m++] = p;
+            }
+        }
+    }
+    return m;
+}
+
+static void draw_monogram(lv_obj_t *canvas, uint8_t soc_pct)
+{
+    lv_canvas_fill_bg(canvas, lv_color_hex(CLR_BG), LV_OPA_COVER);
+
+    lv_coord_t y_cut;
+    if (soc_pct >= 100) {
+        y_cut = y_V_TOP;
+    } else {
+        y_cut = y_V_TOP + (lv_coord_t)((uint32_t)(100 - soc_pct) *
+                                        (uint32_t)(y_V_BOT - y_V_TOP) / 100);
+    }
+
+    const lv_color_t lit = (soc_pct >= 20) ? lv_color_hex(CLR_LIME)
+                                             : lv_color_hex(CLR_RED);
+
+    // Poligoni HTML decomposti in triangoli via ear-clipping.
+    // Coordinate da REEFILLA_Display_Preview.html (viewBox 0 0 480 311.5, 1:1 canvas).
+    // I triangoli sono sempre convessi: fill garantito indipendente dal fill-rule LVGL.
+    static const lv_point_t tris[16][3] = {
+        // left_arm (6 pt → 4 triangoli)
+        {{243,220},{143, 46},{ 96, 46}},
+        {{243,220},{ 96, 46},{221,260}},
+        {{243,220},{221,260},{257,260}},
+        {{257,260},{266,260},{243,220}},
+        // right_bolt (7 pt → 5 triangoli)
+        {{384, 46},{337, 46},{286,135}},
+        {{384, 46},{286,135},{303,135}},
+        {{384, 46},{303,135},{254,221}},
+        {{254,221},{360,126},{338,126}},
+        {{254,221},{338,126},{384, 46}},
+        // right_fill (colma il notch concavo del bolt)
+        {{304,135},{348,137},{254,221}},
+        // bottom_fill (8 pt → 6 triangoli)
+        {{253,237},{207,157},{161,157}},
+        {{253,237},{161,157},{192,210}},
+        {{253,237},{192,210},{221,259}},
+        {{253,237},{221,259},{235,259}},
+        {{253,237},{235,259},{240,259}},
+        {{240,259},{266,259},{253,237}},
+    };
+
+    lv_draw_rect_dsc_t dsc;
+    lv_draw_rect_dsc_init(&dsc);
+    dsc.border_width = 0;
+    dsc.radius       = 0;
+
+    lv_point_t clipped[8];
+    int nc;
+
+    // Pass 1: V completa in CLR_DIM — forma sempre identica indipendente dal SOC
+    dsc.bg_color = lv_color_hex(CLR_DIM);
+    for (int t = 0; t < 16; ++t)
+        lv_canvas_draw_polygon(canvas, tris[t], 3, &dsc);
+
+    // Pass 2: sovrascrittura della porzione inferiore (y >= y_cut) con il colore lit
+    dsc.bg_color = lit;
+    for (int t = 0; t < 16; ++t) {
+        nc = clip_poly_lower(tris[t], 3, clipped, y_cut);
+        if (nc >= 3)
+            lv_canvas_draw_polygon(canvas, clipped, nc, &dsc);
+    }
+}
+
+// ── Helper label ─────────────────────────────────────────────────────────────
+static lv_obj_t *make_label(lv_obj_t *parent,
+                              const char *text,
+                              const lv_font_t *font,
+                              lv_color_t color,
+                              lv_text_align_t align = LV_TEXT_ALIGN_LEFT)
+{
+    lv_obj_t *lbl = lv_label_create(parent);
+    lv_label_set_text(lbl, text);
+    lv_obj_set_style_text_font(lbl, font, 0);
+    lv_obj_set_style_text_color(lbl, color, 0);
+    lv_obj_set_style_text_align(lbl, align, 0);
+    return lbl;
 }
 
 // ── Update ───────────────────────────────────────────────────────────────────
@@ -110,20 +229,23 @@ void ui_main_update()
 
     // ── SOC ──
     uint8_t soc = 0;
-    bool soc_valid = status_valid && s.batt_soc_active >= 0;
+    const bool soc_valid = status_valid && s.batt_soc_active >= 0;
     if (soc_valid) {
         int16_t v = s.batt_soc_active;
         soc = (uint8_t)(v < 0 ? 0 : v > 100 ? 100 : v);
     }
 
-    lv_color_t arc_col = soc_valid ? soc_color(soc) : lv_color_hex(CLR_ACCENT);
-
-    if (soc_arc_fg) {
-        lv_arc_set_value(soc_arc_fg, soc_valid ? soc : 0);
-        lv_obj_set_style_arc_color(soc_arc_fg, arc_col, LV_PART_INDICATOR);
+    // Ridisegna il monogram solo quando il SOC cambia
+    const uint8_t draw_soc = soc_valid ? soc : 0;
+    if (mono_canvas && draw_soc != g_last_drawn_soc) {
+        g_last_drawn_soc = draw_soc;
+        draw_monogram(mono_canvas, draw_soc);
+        lv_obj_invalidate(mono_canvas);
     }
 
+    // Etichetta SOC
     if (label_soc_value) {
+        const lv_color_t col = soc_valid ? soc_color(soc) : lv_color_hex(CLR_TEXT_DIM);
         if (!soc_valid) {
             lv_label_set_text(label_soc_value, DASHES);
         } else {
@@ -131,24 +253,26 @@ void ui_main_update()
             snprintf(buf, sizeof(buf), "%u", (unsigned)soc);
             lv_label_set_text(label_soc_value, buf);
         }
-        lv_obj_set_style_text_color(label_soc_value, lv_color_hex(CLR_LIME), 0);
+        lv_obj_set_style_text_color(label_soc_value, col, 0);
+        if (label_soc_pct)
+            lv_obj_set_style_text_color(label_soc_pct, col, 0);
     }
 
-    // ── Status dot + label ──
+    // ── Stato (dot + etichetta) ──
     if (status_valid && s.main_state >= 0) {
-        StatusInfo si = state_info(s.main_state);
-        if (dot_status)        lv_obj_set_style_bg_color(dot_status, si.color, 0);
+        const StatusInfo si = state_info(s.main_state);
+        if (dot_status)        lv_obj_set_style_bg_color(dot_status, si.dot_color, 0);
         if (label_status_text) {
             lv_label_set_text(label_status_text, si.label);
-            lv_obj_set_style_text_color(label_status_text, si.color, 0);
+            lv_obj_set_style_text_color(label_status_text, si.label_color, 0);
         }
     } else {
         if (dot_status)        lv_obj_set_style_bg_color(dot_status, lv_color_hex(CLR_TEXT_DIM), 0);
         if (label_status_text) lv_label_set_text(label_status_text, DASHES);
     }
 
-    // ── Time remaining ──
-    uint16_t time_min = pick_time_min(s, status_valid);
+    // ── Autonomia ──
+    const uint16_t time_min = pick_time_min(s, status_valid);
     if (label_time_value) {
         if (time_min == TIME_INVALID) {
             lv_label_set_text(label_time_value, DASHES);
@@ -156,56 +280,47 @@ void ui_main_update()
             lv_label_set_text(label_time_value, ">16h");
         } else {
             char buf[16];
-            uint16_t h = time_min / 60U;
-            uint16_t m = time_min % 60U;
+            const uint16_t h = time_min / 60U;
+            const uint16_t m = time_min % 60U;
             if (h > 0) snprintf(buf, sizeof(buf), "%uh %02um", (unsigned)h, (unsigned)m);
             else       snprintf(buf, sizeof(buf), "%um", (unsigned)m);
             lv_label_set_text(label_time_value, buf);
         }
     }
 
-    // ── Power lines ──
-    // Determina quali colonne hanno dati validi: solo i < inv_count
+    // ── Potenza per linea ──
     bool col_valid[3];
     for (int i = 0; i < 3; ++i)
         col_valid[i] = status2_valid && i < s.inv_count;
 
-    // Mostra/nascondi colonne — LVGL flex salta gli oggetti hidden
     for (int i = 0; i < 3; ++i) {
         if (!col_obj[i]) continue;
         if (col_valid[i]) lv_obj_clear_flag(col_obj[i], LV_OBJ_FLAG_HIDDEN);
         else              lv_obj_add_flag  (col_obj[i], LV_OBJ_FLAG_HIDDEN);
     }
-
-    // Separatore 0 (tra col 0 e col 1): visibile solo se entrambe presenti
     if (vsep_obj[0]) {
         if (col_valid[0] && col_valid[1]) lv_obj_clear_flag(vsep_obj[0], LV_OBJ_FLAG_HIDDEN);
         else                              lv_obj_add_flag  (vsep_obj[0], LV_OBJ_FLAG_HIDDEN);
     }
-    // Separatore 1 (tra col 1 e col 2): visibile se col 2 ha dati e c'è almeno una colonna a sinistra
     if (vsep_obj[1]) {
         if (col_valid[2] && (col_valid[0] || col_valid[1])) lv_obj_clear_flag(vsep_obj[1], LV_OBJ_FLAG_HIDDEN);
         else                                                 lv_obj_add_flag  (vsep_obj[1], LV_OBJ_FLAG_HIDDEN);
     }
-
-    // Aggiorna valori nelle colonne
     for (int i = 0; i < 3; ++i) {
-        if (!label_line_value[i]) continue;
-        if (!col_valid[i]) continue;
-        int32_t val = s.inv_p_ac_w[i];
+        if (!label_line_value[i] || !col_valid[i]) continue;
+        const int32_t val = s.inv_p_ac_w[i];
         char buf[16];
         if (val >= 0) snprintf(buf, sizeof(buf), "+%ld", (long)val);
         else          snprintf(buf, sizeof(buf), "%ld",  (long)val);
         lv_label_set_text(label_line_value[i], buf);
-        lv_obj_set_style_text_color(label_line_value[i], lv_color_hex(CLR_LIME), 0);
     }
 
     // ── WiFi / IP ──
     if (label_wifi) {
-        const bool msg3_received = s.status3_lastUpdate_ms != 0;
-        if (!msg3_received) {
+        const bool msg3 = s.status3_lastUpdate_ms != 0;
+        if (!msg3) {
             lv_label_set_text(label_wifi, "WiFi: ---");
-            lv_obj_set_style_text_color(label_wifi, lv_color_hex(CLR_TEXT_VDIM), 0);
+            lv_obj_set_style_text_color(label_wifi, lv_color_hex(CLR_TEXT_DIM), 0);
         } else {
             const uint8_t *ip = s.wifi_ip;
             const bool connected = ip[0] || ip[1] || ip[2] || ip[3];
@@ -213,232 +328,202 @@ void ui_main_update()
                 lv_label_set_text(label_wifi, "WiFi: non connesso");
                 lv_obj_set_style_text_color(label_wifi, lv_color_hex(CLR_TEXT_DIM), 0);
             } else {
-                char buf[40];
+                char buf[48];
                 snprintf(buf, sizeof(buf), "Connesso al WiFi  |  %u.%u.%u.%u",
                          (unsigned)ip[0], (unsigned)ip[1],
                          (unsigned)ip[2], (unsigned)ip[3]);
                 lv_label_set_text(label_wifi, buf);
-                lv_obj_set_style_text_color(label_wifi, lv_color_hex(CLR_PURPLE), 0);
+                lv_obj_set_style_text_color(label_wifi, lv_color_hex(CLR_LIME), 0);
             }
         }
     }
 }
 
-// ── Init helpers ─────────────────────────────────────────────────────────────
-
-static lv_obj_t *make_label(lv_obj_t *parent,
-                             const char *text,
-                             const lv_font_t *font,
-                             lv_color_t color,
-                             lv_text_align_t align = LV_TEXT_ALIGN_LEFT)
-{
-    lv_obj_t *lbl = lv_label_create(parent);
-    lv_label_set_text(lbl, text);
-    lv_obj_set_style_text_font(lbl, font, 0);
-    lv_obj_set_style_text_color(lbl, color, 0);
-    lv_obj_set_style_text_align(lbl, align, 0);
-    return lbl;
-}
-
 // ── Init ─────────────────────────────────────────────────────────────────────
-
 void ui_main_init()
 {
-    Serial.println("[ui_main] Nuova UI VOLTAB Dashboard");
+    Serial.println("[ui_main] Init VOLTAB V3.1 (1)");
 
     lv_obj_t *scr = lv_scr_act();
     lv_obj_set_style_bg_color(scr, lv_color_hex(CLR_BG), 0);
     lv_obj_set_style_bg_opa(scr, LV_OPA_COVER, 0);
 
-    lv_color_t col_accent  = lv_color_hex(CLR_ACCENT);
-    lv_color_t col_white88 = lv_color_hex(CLR_WHITE_88);
-    lv_color_t col_dim     = lv_color_hex(CLR_TEXT_DIM);
-    lv_color_t col_vdim    = lv_color_hex(CLR_TEXT_VDIM);
+    const lv_color_t col_white    = lv_color_hex(CLR_WHITE);
+    const lv_color_t col_lime     = lv_color_hex(CLR_LIME);
+    const lv_color_t col_purple   = lv_color_hex(CLR_PURPLE);
+    const lv_color_t col_dim      = lv_color_hex(CLR_DIM);
+    const lv_color_t col_text_dim = lv_color_hex(CLR_TEXT_DIM);
 
-    // ── TOP BAR ─────────────────────────────────────────────────────────────
-    // height=58, bottom border
-    lv_obj_t *top_bar = lv_obj_create(scr);
-    lv_obj_remove_style_all(top_bar);
-    lv_obj_set_size(top_bar, 480, 58);
-    lv_obj_align(top_bar, LV_ALIGN_TOP_MID, 0, 0);
-    lv_obj_set_style_border_width(top_bar, 1, 0);
-    lv_obj_set_style_border_color(top_bar, lv_color_hex(CLR_BORDER), 0);
-    lv_obj_set_style_border_side(top_bar, LV_BORDER_SIDE_BOTTOM, 0);
-    lv_obj_set_style_bg_opa(top_bar, LV_OPA_TRANSP, 0);
-    lv_obj_set_scroll_dir(top_bar, LV_DIR_NONE);
-
-    // Left: "REEFILLA" + "POWER"
-    lv_obj_t *brand_col = lv_obj_create(top_bar);
-    lv_obj_remove_style_all(brand_col);
-    lv_obj_set_size(brand_col, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
-    lv_obj_align(brand_col, LV_ALIGN_LEFT_MID, 20, 0);
-    lv_obj_set_flex_flow(brand_col, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(brand_col, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_CENTER);
-    lv_obj_set_style_pad_column(brand_col, 5, 0);
-
-    label_brand = make_label(brand_col, "VOLTAB", &font_orbitron_14, lv_color_hex(CLR_LIME));
-    make_label(brand_col, "POWER", &font_orbitron_14, col_vdim);
-
-    // Center: "AUTONOMIA" title + time value
-    lv_obj_t *time_col = lv_obj_create(top_bar);
-    lv_obj_remove_style_all(time_col);
-    lv_obj_set_size(time_col, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
-    lv_obj_align(time_col, LV_ALIGN_CENTER, 0, 0);
-    lv_obj_set_flex_flow(time_col, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_flex_align(time_col, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_set_style_pad_row(time_col, 1, 0);
-
-    label_auto_title = make_label(time_col, "AUTONOMIA", &font_orbitron_14, col_dim, LV_TEXT_ALIGN_CENTER);
-    label_time_value = make_label(time_col, DASHES, &font_orbitron_20, col_white88, LV_TEXT_ALIGN_CENTER);
-
-    // Right: status dot + label
-    lv_obj_t *status_row = lv_obj_create(top_bar);
-    lv_obj_remove_style_all(status_row);
-    lv_obj_set_size(status_row, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
-    lv_obj_align(status_row, LV_ALIGN_RIGHT_MID, -20, 0);
-    lv_obj_set_flex_flow(status_row, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(status_row, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_set_style_pad_column(status_row, 6, 0);
-
-    dot_status = lv_obj_create(status_row);
-    lv_obj_remove_style_all(dot_status);
-    lv_obj_set_size(dot_status, 10, 10);
-    lv_obj_set_style_radius(dot_status, LV_RADIUS_CIRCLE, 0);
-    lv_obj_set_style_bg_color(dot_status, col_dim, 0);
-    lv_obj_set_style_bg_opa(dot_status, LV_OPA_COVER, 0);
-
-    label_status_text = make_label(status_row, DASHES, &font_orbitron_14, col_dim);
-
-    // ── ARC GAUGE ────────────────────────────────────────────────────────────
-    // Center on screen: (240, 236) → top-left of 260×260 widget: (110, 106)
-    // Rotation 120° + bg_angles(0, 300) → 300° arc, gap at bottom 60°
-    const lv_coord_t ARC_SZ = 260;
-    const lv_coord_t ARC_W  = 14;
-    const lv_coord_t arc_x  = 240 - ARC_SZ / 2;   // 110
-    const lv_coord_t arc_y  = 236 - ARC_SZ / 2;   // 106
-
-    // Background track
-    soc_arc_bg = lv_arc_create(scr);
-    lv_obj_set_size(soc_arc_bg, ARC_SZ, ARC_SZ);
-    lv_obj_set_pos(soc_arc_bg, arc_x, arc_y);
-    lv_arc_set_rotation(soc_arc_bg, 120);
-    lv_arc_set_bg_angles(soc_arc_bg, 0, 300);
-    lv_arc_set_range(soc_arc_bg, 0, 100);
-    lv_arc_set_value(soc_arc_bg, 100);
-    lv_obj_clear_flag(soc_arc_bg, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_set_style_arc_width(soc_arc_bg, ARC_W, LV_PART_MAIN);
-    lv_obj_set_style_arc_color(soc_arc_bg, lv_color_hex(CLR_TRACK), LV_PART_MAIN);
-    lv_obj_set_style_arc_opa(soc_arc_bg, LV_OPA_COVER, LV_PART_MAIN);
-    lv_obj_set_style_arc_opa(soc_arc_bg, LV_OPA_TRANSP, LV_PART_INDICATOR);
-    lv_obj_set_style_bg_opa(soc_arc_bg, LV_OPA_TRANSP, 0);
-    lv_obj_set_style_bg_opa(soc_arc_bg, LV_OPA_TRANSP, LV_PART_KNOB);
-
-    // Fill arc
-    soc_arc_fg = lv_arc_create(scr);
-    lv_obj_set_size(soc_arc_fg, ARC_SZ, ARC_SZ);
-    lv_obj_set_pos(soc_arc_fg, arc_x, arc_y);
-    lv_arc_set_rotation(soc_arc_fg, 120);
-    lv_arc_set_bg_angles(soc_arc_fg, 0, 300);
-    lv_arc_set_range(soc_arc_fg, 0, 100);
-    lv_arc_set_value(soc_arc_fg, 0);
-    lv_obj_clear_flag(soc_arc_fg, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_set_style_arc_width(soc_arc_fg, ARC_W, LV_PART_MAIN);
-    lv_obj_set_style_arc_color(soc_arc_fg, lv_color_hex(CLR_TRACK), LV_PART_MAIN);
-    lv_obj_set_style_arc_width(soc_arc_fg, ARC_W, LV_PART_INDICATOR);
-    lv_obj_set_style_arc_color(soc_arc_fg, col_accent, LV_PART_INDICATOR);
-    lv_obj_set_style_arc_opa(soc_arc_fg, LV_OPA_COVER, LV_PART_INDICATOR);
-    lv_obj_set_style_bg_opa(soc_arc_fg, LV_OPA_TRANSP, 0);
-    lv_obj_set_style_bg_opa(soc_arc_fg, LV_OPA_TRANSP, LV_PART_KNOB);
-    lv_obj_move_foreground(soc_arc_fg);
-
-    // ── CENTER TEXT ──────────────────────────────────────────────────────────
-    // Positioned over arc center (240, 236)
-    lv_obj_t *center_col = lv_obj_create(scr);
-    lv_obj_remove_style_all(center_col);
-    lv_obj_set_size(center_col, 200, LV_SIZE_CONTENT);
-    lv_obj_align(center_col, LV_ALIGN_CENTER, 0, -4);     // arc center at y=236, screen center 240
-    lv_obj_set_flex_flow(center_col, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_flex_align(center_col, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_set_style_pad_row(center_col, 4, 0);
-    lv_obj_move_foreground(center_col);
-
-    label_soc_value = make_label(center_col, DASHES, &font_orbitron_48, col_accent, LV_TEXT_ALIGN_CENTER);
-
-    label_soc_sub = make_label(center_col, "%", &font_orbitron_28, col_dim, LV_TEXT_ALIGN_CENTER);
-
-    // ── ARC EDGE LABELS ──────────────────────────────────────────────────────
-    // "0%"   at arc start: angle 120° from center (240,236), R=130 + gap offset
-    // In SVG: 120° → x=cx+R*cos(120°)=240-65=175, y=cy+R*sin(120°)=236+112=348
-    // Add a bit of offset outward to clear the arc
-    // Positions from HTML: cx-118=122 and cx+118=358, y = SVG(316)+40 = 356
-    // text-anchor="middle" → top-left = center_x - half_label_width, top_y = y - font_height
-    label_arc_start = make_label(scr, "0%", &font_orbitron_14, col_vdim, LV_TEXT_ALIGN_CENTER);
-    lv_obj_set_pos(label_arc_start, 113, 342);   // center x≈122, baseline y≈356
-
-    label_arc_end = make_label(scr, "100%", &font_orbitron_14, col_vdim, LV_TEXT_ALIGN_CENTER);
-    lv_obj_set_pos(label_arc_end, 340, 342);     // center x≈358, baseline y≈356
-
-    // ── HORIZONTAL DIVIDER ────────────────────────────────────────────────────
-    lv_obj_t *divider = lv_obj_create(scr);
-    lv_obj_remove_style_all(divider);
-    lv_obj_set_size(divider, 440, 1);
-    lv_obj_align(divider, LV_ALIGN_BOTTOM_MID, 0, -110);
-    lv_obj_set_style_bg_color(divider, lv_color_hex(CLR_DIVIDER), 0);
-    lv_obj_set_style_bg_opa(divider, LV_OPA_COVER, 0);
-
-    // ── POWER LINES ──────────────────────────────────────────────────────────
-    // y=370 to y=460, height=90 (lascia 20px in basso per la WiFi bar)
-    lv_obj_t *power_row = lv_obj_create(scr);
-    lv_obj_remove_style_all(power_row);
-    lv_obj_set_size(power_row, 480, 90);
-    lv_obj_align(power_row, LV_ALIGN_BOTTOM_MID, 0, -20);
-    lv_obj_set_flex_flow(power_row, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(power_row, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_set_style_pad_left(power_row, 16, 0);
-    lv_obj_set_style_pad_right(power_row, 16, 0);
-    lv_obj_set_scroll_dir(power_row, LV_DIR_NONE);
-
-    const char *line_titles[3] = { "LINEA 1", "LINEA 2", "LINEA 3" };
-    for (int i = 0; i < 3; ++i) {
-        if (i > 0) {
-            lv_obj_t *vsep = lv_obj_create(power_row);
-            lv_obj_remove_style_all(vsep);
-            lv_obj_set_size(vsep, 1, 50);
-            lv_obj_set_style_bg_color(vsep, lv_color_hex(CLR_DIVIDER), 0);
-            lv_obj_set_style_bg_opa(vsep, LV_OPA_COVER, 0);
-            lv_obj_set_flex_grow(vsep, 0);
-            vsep_obj[i - 1] = vsep;   // vsep_obj[0] tra col0–col1, vsep_obj[1] tra col1–col2
-        }
-
-        lv_obj_t *col = lv_obj_create(power_row);
-        lv_obj_remove_style_all(col);
-        lv_obj_set_flex_grow(col, 1);
-        lv_obj_set_height(col, 90);
-        lv_obj_set_flex_flow(col, LV_FLEX_FLOW_COLUMN);
-        lv_obj_set_flex_align(col, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-        lv_obj_set_style_pad_row(col, 2, 0);
-        lv_obj_set_style_text_align(col, LV_TEXT_ALIGN_CENTER, 0);
-        col_obj[i] = col;
-
-        label_line_title[i] = make_label(col, line_titles[i], &font_orbitron_14, col_dim, LV_TEXT_ALIGN_CENTER);
-        label_line_value[i] = make_label(col, DASHES, &font_orbitron_20, lv_color_hex(CLR_TEAL), LV_TEXT_ALIGN_CENTER);
-        label_line_unit[i]  = make_label(col, "W", &font_orbitron_14, col_vdim, LV_TEXT_ALIGN_CENTER);
+    // ── CANVAS monogram (primo in Z-order: dietro tutto) ─────────────────────
+    // 480×311 px @ (0, 79) — buffer in PSRAM (~293 KB RGB565)
+    size_t buf_sz = (size_t)480 * H_STAGE * sizeof(lv_color_t);
+    canvas_buf = (uint8_t *)heap_caps_malloc(buf_sz, MALLOC_CAP_SPIRAM);
+    if (canvas_buf) {
+        mono_canvas = lv_canvas_create(scr);
+        lv_canvas_set_buffer(mono_canvas, canvas_buf, 480, H_STAGE, LV_IMG_CF_TRUE_COLOR);
+        lv_obj_set_pos(mono_canvas, 0, Y_STAGE);
+        lv_obj_clear_flag(mono_canvas, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
+        // Disegno iniziale con SOC=0 (V spenta)
+        draw_monogram(mono_canvas, 0);
+        g_last_drawn_soc = 0;
+    } else {
+        Serial.println("[ui_main] WARN: PSRAM insufficiente per il monogram canvas");
     }
 
-    // ── WIFI BAR ─────────────────────────────────────────────────────────────
-    lv_obj_t *wifi_bar = lv_obj_create(scr);
-    lv_obj_remove_style_all(wifi_bar);
-    lv_obj_set_size(wifi_bar, 480, 20);
-    lv_obj_align(wifi_bar, LV_ALIGN_BOTTOM_MID, 0, 0);
-    lv_obj_set_style_border_width(wifi_bar, 1, 0);
-    lv_obj_set_style_border_color(wifi_bar, lv_color_hex(CLR_BORDER), 0);
-    lv_obj_set_style_border_side(wifi_bar, LV_BORDER_SIDE_TOP, 0);
-    lv_obj_set_style_bg_opa(wifi_bar, LV_OPA_TRANSP, 0);
-    lv_obj_set_flex_flow(wifi_bar, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(wifi_bar, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_set_scroll_dir(wifi_bar, LV_DIR_NONE);
+    // ── WIFI BAR – in cima (y=0, h=20) ──────────────────────────────────────
+    {
+        lv_obj_t *wb = lv_obj_create(scr);
+        lv_obj_remove_style_all(wb);
+        lv_obj_set_size(wb, 480, 20);
+        lv_obj_set_pos(wb, 0, 0);
+        lv_obj_set_style_bg_opa(wb, LV_OPA_TRANSP, 0);
+        lv_obj_set_scroll_dir(wb, LV_DIR_NONE);
+        lv_obj_set_flex_flow(wb, LV_FLEX_FLOW_ROW);
+        lv_obj_set_flex_align(wb, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+        label_wifi = make_label(wb, "WiFi: ---", &font_orbitron_14, col_text_dim, LV_TEXT_ALIGN_CENTER);
+    }
 
-    label_wifi = make_label(wifi_bar, "WiFi: ---", &font_orbitron_14, col_vdim, LV_TEXT_ALIGN_CENTER);
+    // ── DIVISORI orizzontali (y=20 e y=78) ───────────────────────────────────
+    for (lv_coord_t y : { (lv_coord_t)20, (lv_coord_t)78 }) {
+        lv_obj_t *d = lv_obj_create(scr);
+        lv_obj_remove_style_all(d);
+        lv_obj_set_size(d, 480, 1);
+        lv_obj_set_pos(d, 0, y);
+        lv_obj_set_style_bg_color(d, col_dim, 0);
+        lv_obj_set_style_bg_opa(d, LV_OPA_COVER, 0);
+    }
 
-    Serial.println("[ui_main] UI VOLTAB Dashboard pronta");
+    // ── TOP BAR (y=21, h=57) ─────────────────────────────────────────────────
+
+    // Sinistra: "VOLTAB" / "POWER" — centrato verticalmente nel topbar
+    // Contenuto: ~20px (VOLTAB) + 9px gap + ~14px (POWER) = 43px su 57px disponibili
+    {
+        lv_obj_t *bc = lv_obj_create(scr);
+        lv_obj_remove_style_all(bc);
+        lv_obj_set_size(bc, 88, H_TOPBAR);
+        lv_obj_set_pos(bc, 24, Y_TOPBAR);
+        lv_obj_set_flex_flow(bc, LV_FLEX_FLOW_COLUMN);
+        lv_obj_set_flex_align(bc, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+        lv_obj_set_style_pad_row(bc, 9, 0);
+        lv_obj_set_scroll_dir(bc, LV_DIR_NONE);
+        make_label(bc, "VOLTAB", &font_orbitron_14, col_lime, LV_TEXT_ALIGN_CENTER);
+        make_label(bc, "POWER",  &font_orbitron_14, col_dim,  LV_TEXT_ALIGN_CENTER);
+    }
+
+    // Centro: "AUTONOMIA" + tempo — centrato verticalmente nel topbar
+    // Contenuto: ~14px (AUTONOMIA) + 7px gap + ~20px (valore) = 41px su 57px
+    {
+        lv_obj_t *tc = lv_obj_create(scr);
+        lv_obj_remove_style_all(tc);
+        lv_obj_set_size(tc, 200, H_TOPBAR);
+        lv_obj_set_pos(tc, (480 - 200) / 2, Y_TOPBAR);
+        lv_obj_set_flex_flow(tc, LV_FLEX_FLOW_COLUMN);
+        lv_obj_set_flex_align(tc, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+        lv_obj_set_style_pad_row(tc, 7, 0);
+        lv_obj_set_scroll_dir(tc, LV_DIR_NONE);
+        label_auto_title = make_label(tc, "AUTONOMIA", &font_orbitron_14, col_white, LV_TEXT_ALIGN_CENTER);
+        label_time_value = make_label(tc, DASHES,      &font_orbitron_20, col_white, LV_TEXT_ALIGN_CENTER);
+    }
+
+    // Destra: dot + etichetta stato
+    // HTML V3.1(1): top:0; height:58px; align-items:center → centrato verticalmente nel topbar
+    {
+        lv_obj_t *sr = lv_obj_create(scr);
+        lv_obj_remove_style_all(sr);
+        lv_obj_set_size(sr, 180, 20);
+        // Centro verticale: Y_TOPBAR + (H_TOPBAR - 20) / 2
+        lv_obj_set_pos(sr, 480 - 22 - 180, Y_TOPBAR + (H_TOPBAR - 20) / 2);
+        lv_obj_set_flex_flow(sr, LV_FLEX_FLOW_ROW);
+        lv_obj_set_flex_align(sr, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+        lv_obj_set_style_pad_column(sr, 6, 0);
+        lv_obj_set_scroll_dir(sr, LV_DIR_NONE);
+
+        dot_status = lv_obj_create(sr);
+        lv_obj_remove_style_all(dot_status);
+        lv_obj_set_size(dot_status, 10, 10);
+        lv_obj_set_style_radius(dot_status, LV_RADIUS_CIRCLE, 0);
+        lv_obj_set_style_bg_color(dot_status, col_text_dim, 0);
+        lv_obj_set_style_bg_opa(dot_status, LV_OPA_COVER, 0);
+
+        label_status_text = make_label(sr, DASHES, &font_orbitron_14, col_text_dim);
+    }
+
+    // ── ETICHETTE SCALA (sopra il canvas) ────────────────────────────────────
+    // HTML: .scale-100 { left:226px; top:30px } e .scale-0 { left:232px; top:268.5px }
+    // relative to stage (y=79)
+    {
+        lv_obj_t *l = make_label(scr, "100%", &font_orbitron_14, col_dim);
+        lv_obj_set_pos(l, 226, Y_STAGE + 30);
+    }
+    {
+        lv_obj_t *l = make_label(scr, "0%", &font_orbitron_14, col_dim);
+        lv_obj_set_pos(l, 232, Y_STAGE + 268);
+    }
+
+    // ── TESTO SOC CENTRALE (sopra il canvas) ─────────────────────────────────
+    // HTML: .center-text { top:80px } relative to stage → abs y = 79+80 = 159
+    {
+        lv_obj_t *sc = lv_obj_create(scr);
+        lv_obj_remove_style_all(sc);
+        lv_obj_set_size(sc, 200, LV_SIZE_CONTENT);
+        lv_obj_set_pos(sc, (480 - 200) / 2, Y_STAGE + 80);
+        lv_obj_set_flex_flow(sc, LV_FLEX_FLOW_COLUMN);
+        lv_obj_set_flex_align(sc, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+        lv_obj_set_style_pad_row(sc, 12, 0);
+        lv_obj_set_scroll_dir(sc, LV_DIR_NONE);
+        label_soc_value = make_label(sc, DASHES, &font_orbitron_48, col_purple, LV_TEXT_ALIGN_CENTER);
+        label_soc_pct   = make_label(sc, "%",    &font_orbitron_28, col_purple, LV_TEXT_ALIGN_CENTER);
+    }
+
+    // ── POWER ROW (y=390, h=90) ──────────────────────────────────────────────
+    {
+        lv_obj_t *pr = lv_obj_create(scr);
+        lv_obj_remove_style_all(pr);
+        lv_obj_set_size(pr, 480, H_POWERROW);
+        lv_obj_set_pos(pr, 0, Y_POWERROW);
+        lv_obj_set_flex_flow(pr, LV_FLEX_FLOW_ROW);
+        lv_obj_set_flex_align(pr, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+        lv_obj_set_style_pad_left(pr, 16, 0);
+        lv_obj_set_style_pad_right(pr, 16, 0);
+        lv_obj_set_scroll_dir(pr, LV_DIR_NONE);
+
+        const char *titles[3] = { "Linea 1", "Linea 2", "Linea 3" };
+        for (int i = 0; i < 3; ++i) {
+            if (i > 0) {
+                lv_obj_t *vs = lv_obj_create(pr);
+                lv_obj_remove_style_all(vs);
+                lv_obj_set_size(vs, 1, 50);
+                lv_obj_set_style_bg_color(vs, col_dim, 0);
+                lv_obj_set_style_bg_opa(vs, LV_OPA_COVER, 0);
+                lv_obj_set_flex_grow(vs, 0);
+                vsep_obj[i - 1] = vs;
+            }
+
+            lv_obj_t *col = lv_obj_create(pr);
+            lv_obj_remove_style_all(col);
+            lv_obj_set_flex_grow(col, 1);
+            lv_obj_set_height(col, H_POWERROW);
+            lv_obj_set_flex_flow(col, LV_FLEX_FLOW_COLUMN);
+            lv_obj_set_flex_align(col, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+            lv_obj_set_style_pad_row(col, 4, 0);
+            lv_obj_set_scroll_dir(col, LV_DIR_NONE);
+            col_obj[i] = col;
+
+            label_line_title[i] = make_label(col, titles[i], &font_orbitron_14, col_white,  LV_TEXT_ALIGN_CENTER);
+
+            // Barra orizzontale 78×1 px
+            {
+                lv_obj_t *bar = lv_obj_create(col);
+                lv_obj_remove_style_all(bar);
+                lv_obj_set_size(bar, 78, 1);
+                lv_obj_set_style_bg_color(bar, col_dim, 0);
+                lv_obj_set_style_bg_opa(bar, LV_OPA_COVER, 0);
+            }
+
+            label_line_value[i] = make_label(col, DASHES, &font_orbitron_20, col_purple, LV_TEXT_ALIGN_CENTER);
+            label_line_unit[i]  = make_label(col, "W",    &font_orbitron_14, col_dim,    LV_TEXT_ALIGN_CENTER);
+        }
+    }
+
+    Serial.println("[ui_main] VOLTAB V3.1 (1) pronta");
 }
