@@ -1,4 +1,5 @@
 #include <Arduino.h>
+#include "config.h"
 #include "panel_port.h"
 #include "lv_port.h"
 #include "ui_main.h"
@@ -10,6 +11,7 @@ void setup()
   delay(500);
   Serial.println();
   Serial.println("===== ESP32-S3 4\" PANEL - LVGL + CAN =====");
+  Serial.println("Display FW v" DISPLAY_FIRMWARE_VERSION);
 
   if (!panel_port_init()) {
     Serial.println("ERRORE: panel_port_init() fallita, mi fermo.");
