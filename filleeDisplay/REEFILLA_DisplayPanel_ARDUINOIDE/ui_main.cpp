@@ -7,6 +7,7 @@
 
 #include "ui_main.h"
 #include "dbc_decoder.h"
+#include "config.h"
 
 LV_FONT_DECLARE(font_orbitron_14);
 LV_FONT_DECLARE(font_orbitron_20);
@@ -461,6 +462,12 @@ void ui_main_init()
         lv_obj_set_flex_flow(wb, LV_FLEX_FLOW_ROW);
         lv_obj_set_flex_align(wb, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
         label_wifi = make_label(wb, "WiFi: ---", &font_orbitron_14, col_text_dim, LV_TEXT_ALIGN_CENTER);
+    }
+
+    // ── VERSIONE FIRMWARE – top-left nella wifi bar ───────────────────────────
+    {
+        lv_obj_t *lv = make_label(scr, "v" DISPLAY_FIRMWARE_VERSION, &font_orbitron_14, col_text_dim);
+        lv_obj_set_pos(lv, 6, 3);
     }
 
     // ── DIVISORI orizzontali (y=20 e y=78) ───────────────────────────────────
