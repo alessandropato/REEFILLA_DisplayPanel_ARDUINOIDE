@@ -393,7 +393,7 @@ void ui_main_update()
         lv_label_set_text(label_line_value[i], buf);
     }
 
-    // ── WiFi / IP ──
+    // ── WiFi / IP / MQTT ──
     if (label_wifi) {
         const bool msg3 = s.status3_lastUpdate_ms != 0;
         if (!msg3) {
@@ -401,17 +401,19 @@ void ui_main_update()
             lv_obj_set_style_text_color(label_wifi, lv_color_hex(CLR_TEXT_DIM), 0);
         } else {
             const uint8_t *ip = s.wifi_ip;
-            const bool connected = ip[0] || ip[1] || ip[2] || ip[3];
-            if (!connected) {
+            const bool wifi_ok = ip[0] || ip[1] || ip[2] || ip[3];
+            if (!wifi_ok) {
                 lv_label_set_text(label_wifi, "WiFi: non connesso");
                 lv_obj_set_style_text_color(label_wifi, lv_color_hex(CLR_TEXT_DIM), 0);
             } else {
-                char buf[48];
-                snprintf(buf, sizeof(buf), "Connesso al WiFi  |  %u.%u.%u.%u",
+                char buf[64];
+                snprintf(buf, sizeof(buf), "WiFi %u.%u.%u.%u  |  MQTT: %s",
                          (unsigned)ip[0], (unsigned)ip[1],
-                         (unsigned)ip[2], (unsigned)ip[3]);
+                         (unsigned)ip[2], (unsigned)ip[3],
+                         s.mqtt_is_connected ? "OK" : "---");
                 lv_label_set_text(label_wifi, buf);
-                lv_obj_set_style_text_color(label_wifi, lv_color_hex(CLR_LIME), 0);
+                lv_obj_set_style_text_color(label_wifi,
+                    s.mqtt_is_connected ? lv_color_hex(CLR_LIME) : lv_color_hex(CLR_YELLOW), 0);
             }
         }
     }

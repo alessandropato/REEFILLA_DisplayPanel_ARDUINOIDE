@@ -67,19 +67,21 @@ static void decode_msg2(const CanFrame &frame)
 // ── VCU_DISPLAY_STATUS_MSG3 ───────────────────────────────────────────────────
 static void decode_msg3(const CanFrame &frame)
 {
-  if (frame.dlc < 4) {
-    Serial.println("[DBC] MSG3: DLC < 4, ignorato");
+  if (frame.dlc < 5) {
+    Serial.println("[DBC] MSG3: DLC < 5, ignorato");
     return;
   }
   const uint8_t *d = frame.data;
   for (int i = 0; i < 4; ++i) g_state.wifi_ip[i] = d[i];
+  g_state.mqtt_is_connected     = (d[4] == 1);
   g_state.status3_lastUpdate_ms = frame.timestamp_ms;
 
-  if (d[0] == 0 && d[1] == 0 && d[2] == 0 && d[3] == 0) {
-    Serial.println("[DBC] MSG3: WiFi non connesso");
-  } else {
-    Serial.printf("[DBC] MSG3: IP=%u.%u.%u.%u\n", d[0], d[1], d[2], d[3]);
-  }
+  const bool wifi_ok = d[0] || d[1] || d[2] || d[3];
+  Serial.printf("[DBC] MSG3: %s  MQTT=%s\n",
+      wifi_ok ? "IP=" : "WiFi non connesso",
+      g_state.mqtt_is_connected ? "connesso" : "disconnesso");
+  if (wifi_ok)
+    Serial.printf("  IP=%u.%u.%u.%u\n", d[0], d[1], d[2], d[3]);
 }
 
 // ── Entry point ───────────────────────────────────────────────────────────────

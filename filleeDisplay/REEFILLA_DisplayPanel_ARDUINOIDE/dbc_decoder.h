@@ -21,6 +21,7 @@ struct DbcState
 
   // ================== VCU_DISPLAY_STATUS_MSG3 (0x1088A2F1) ==================
   uint8_t  wifi_ip[4]            = {0, 0, 0, 0}; // IP address; tutti 0x00 = WiFi non connesso
+  bool     mqtt_is_connected     = false;          // B4: 0=disconnesso, 1=connesso
   uint32_t status3_lastUpdate_ms = 0;
 };
 
