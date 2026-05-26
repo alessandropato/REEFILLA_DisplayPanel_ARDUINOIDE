@@ -53,15 +53,12 @@ static void ota_progress_cb(int cur, int total)
     if (pct == last_pct) return;
     last_pct = pct;
 
-    // Solo aggiornamento memoria: nessun flush SPI durante il download OTA.
-    // Durante esp_ota_write() le flash write bloccano il bus QSPI e possono
-    // interrompere i trasferimenti SPI del display → display corrotto.
-    // Il refresh avviene una volta sola dopo che httpUpdate termina e il
-    // WiFi è spento.
     lv_bar_set_value(s_bar_progress, pct, LV_ANIM_OFF);
     char buf[8];
     snprintf(buf, sizeof(buf), "%d%%", pct);
     lv_label_set_text(s_lbl_progress, buf);
+    lv_tick_inc(5);
+    lv_refr_now(lv_disp_get_default());
 }
 
 // ── Parsing versione dal JSON {"version":"X.Y.Z"} ────────────────────────────
