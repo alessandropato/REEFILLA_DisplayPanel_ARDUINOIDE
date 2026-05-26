@@ -5,7 +5,7 @@
 #include <WiFi.h>
 #include <WiFiClientSecure.h>
 #include <HTTPClient.h>
-#include <HTTPUpdate.h>
+#include <esp_ota_ops.h>
 #include <lvgl.h>
 
 LV_FONT_DECLARE(font_orbitron_14);
@@ -44,21 +44,73 @@ static void set_status(const char *msg, lv_color_t color)
 
 // ── Progress callback per HTTPUpdate ─────────────────────────────────────────
 
-static void ota_progress_cb(int cur, int total)
+// Aggiorna la barra con la stessa logica del main loop:
+// lv_timer_handler() chiamato tra un chunk e l'altro, non dentro un callback bloccante.
+static void update_progress_ui(int pct)
 {
-    if (!s_bar_progress || !s_lbl_progress) return;
-    const int pct = (total > 0) ? (int)((long)cur * 100 / total) : 0;
-
     static int last_pct = -1;
     if (pct == last_pct) return;
     last_pct = pct;
 
-    lv_bar_set_value(s_bar_progress, pct, LV_ANIM_OFF);
-    char buf[8];
-    snprintf(buf, sizeof(buf), "%d%%", pct);
-    lv_label_set_text(s_lbl_progress, buf);
-    lv_tick_inc(5);
-    lv_refr_now(lv_disp_get_default());
+    if (s_bar_progress) lv_bar_set_value(s_bar_progress, pct, LV_ANIM_OFF);
+    if (s_lbl_progress) {
+        char buf[8];
+        snprintf(buf, sizeof(buf), "%d%%", pct);
+        lv_label_set_text(s_lbl_progress, buf);
+    }
+}
+
+// Download + flash manuale a chunk: lv_timer_handler() viene chiamato
+// tra un chunk e l'altro, esattamente come nel main loop.
+static bool do_ota_update(const char *url)
+{
+    WiFiClientSecure client;
+    client.setInsecure();
+
+    HTTPClient http;
+    if (!http.begin(client, url)) return false;
+
+    const int code = http.GET();
+    if (code != HTTP_CODE_OK) { http.end(); return false; }
+
+    const int total = http.getSize();
+    WiFiClient *stream = http.getStreamPtr();
+
+    const esp_partition_t *part = esp_ota_get_next_update_partition(NULL);
+    if (!part) { http.end(); return false; }
+
+    esp_ota_handle_t ota;
+    if (esp_ota_begin(part, total > 0 ? (size_t)total : OTA_SIZE_UNKNOWN, &ota) != ESP_OK) {
+        http.end(); return false;
+    }
+
+    static uint8_t buf[4096];
+    int downloaded = 0;
+    bool ok = true;
+
+    while (http.connected() || stream->available()) {
+        const int avail = stream->available();
+        if (avail > 0) {
+            const int n = stream->readBytes(buf, min(avail, (int)sizeof(buf)));
+            if (n > 0) {
+                if (esp_ota_write(ota, buf, n) != ESP_OK) { ok = false; break; }
+                downloaded += n;
+                update_progress_ui(total > 0 ? downloaded * 100 / total : 0);
+            }
+        }
+
+        // Stesso pattern del main loop: tick + render tra un chunk e l'altro
+        lv_tick_inc(5);
+        lv_timer_handler();
+        delay(5);
+
+        if (total > 0 && downloaded >= total) break;
+    }
+
+    http.end();
+    if (!ok) { esp_ota_abort(ota); return false; }
+    if (esp_ota_end(ota) != ESP_OK) return false;
+    return esp_ota_set_boot_partition(part) == ESP_OK;
 }
 
 // ── Parsing versione dal JSON {"version":"X.Y.Z"} ────────────────────────────
@@ -248,42 +300,21 @@ void ota_run()
     lv_obj_clear_flag(s_lbl_progress, LV_OBJ_FLAG_HIDDEN);
     lv_pump(20);
 
-    httpUpdate.onProgress(ota_progress_cb);
-    httpUpdate.rebootOnUpdate(false);
+    const bool update_ok = do_ota_update(OTA_BIN_URL);
 
-    WiFiClientSecure client2;
-    client2.setInsecure();
-    const t_httpUpdate_return ret = httpUpdate.update(client2, OTA_BIN_URL);
-
-    // WiFi off prima di qualsiasi refresh display: evita conflitti SPI/flash
     WiFi.disconnect(true);
     WiFi.mode(WIFI_OFF);
-    delay(100);
 
-    switch (ret) {
-        case HTTP_UPDATE_OK:
-            lv_bar_set_value(s_bar_progress, 100, LV_ANIM_OFF);
-            lv_label_set_text(s_lbl_progress, "100%");
-            set_status("Aggiornamento completato! Riavvio...", lv_color_hex(OTA_CLR_LIME));
-            lv_pump(50);
-            delay(1000);
-            ESP.restart();
-            break;
-
-        case HTTP_UPDATE_FAILED:
-            snprintf(msg, sizeof(msg), "Errore: %s", httpUpdate.getLastErrorString().c_str());
-            set_status(msg, lv_color_hex(OTA_CLR_RED));
-            delay(2000);
-            lv_pump(5);
-            lv_obj_clean(lv_scr_act());
-            break;
-
-        case HTTP_UPDATE_NO_UPDATES:
-        default:
-            set_status("Nessun aggiornamento disponibile", lv_color_hex(OTA_CLR_TEXT_DIM));
-            delay(1500);
-            lv_pump(5);
-            lv_obj_clean(lv_scr_act());
-            break;
+    if (update_ok) {
+        update_progress_ui(100);
+        set_status("Aggiornamento completato! Riavvio...", lv_color_hex(OTA_CLR_LIME));
+        lv_pump(50);
+        delay(1000);
+        ESP.restart();
+    } else {
+        set_status("Errore aggiornamento", lv_color_hex(OTA_CLR_RED));
+        delay(2000);
+        lv_pump(5);
+        lv_obj_clean(lv_scr_act());
     }
 }
