@@ -2,6 +2,7 @@
 #include "config.h"
 #include "panel_port.h"
 #include "lv_port.h"
+#include "ota_manager.h"
 #include "ui_main.h"
 #include "can_port.h"
 
@@ -21,6 +22,12 @@ void setup()
   }
 
   lv_port_init(panel_port_get_lcd(), panel_port_get_touch());
+
+  // Schermata di boot + check aggiornamenti OTA
+  // Se trova una versione più recente la installa e riavvia.
+  // Altrimenti pulisce lo schermo e ritorna.
+  ota_run();
+
   ui_main_init();
 
   // ---- CAN ----
