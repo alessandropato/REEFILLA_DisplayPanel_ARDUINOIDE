@@ -57,7 +57,10 @@ static void ota_progress_cb(int cur, int total)
     char buf[8];
     snprintf(buf, sizeof(buf), "%d%%", pct);
     lv_label_set_text(s_lbl_progress, buf);
-    lv_pump(5);
+
+    // Aggiorna SOLO il display (non tutti i timer LVGL)
+    lv_tick_inc(5);
+    lv_refr_now(lv_disp_get_default());
 }
 
 // ── Parsing versione dal JSON {"version":"X.Y.Z"} ────────────────────────────
@@ -131,9 +134,11 @@ static void build_boot_screen()
     lv_obj_set_style_text_color(s_lbl_status, lv_color_hex(OTA_CLR_WHITE), 0);
     lv_obj_set_style_text_align(s_lbl_status, LV_TEXT_ALIGN_CENTER, 0);
 
-    // Barra progresso (nascosta fino all'aggiornamento)
-    s_bar_progress = lv_bar_create(cnt);
+    // Barra progresso – posizione assoluta su scr (fuori dal flex)
+    // Larghezza fissa: evita re-layout cascade quando il valore cambia
+    s_bar_progress = lv_bar_create(scr);
     lv_obj_set_size(s_bar_progress, 300, 10);
+    lv_obj_set_pos(s_bar_progress, (480 - 300) / 2, 400);
     lv_obj_set_style_bg_color(s_bar_progress, lv_color_hex(OTA_CLR_DIM), LV_PART_MAIN);
     lv_obj_set_style_bg_opa(s_bar_progress, LV_OPA_COVER, LV_PART_MAIN);
     lv_obj_set_style_border_width(s_bar_progress, 0, LV_PART_MAIN);
@@ -145,9 +150,11 @@ static void build_boot_screen()
     lv_bar_set_value(s_bar_progress, 0, LV_ANIM_OFF);
     lv_obj_add_flag(s_bar_progress, LV_OBJ_FLAG_HIDDEN);
 
-    // Label percentuale
-    s_lbl_progress = lv_label_create(cnt);
+    // Label percentuale – larghezza fissa (evita resize quando "0%"→"100%")
+    s_lbl_progress = lv_label_create(scr);
     lv_label_set_text(s_lbl_progress, "");
+    lv_obj_set_size(s_lbl_progress, 80, LV_SIZE_CONTENT);
+    lv_obj_set_pos(s_lbl_progress, (480 - 80) / 2, 416);
     lv_obj_set_style_text_font(s_lbl_progress, &font_orbitron_14, 0);
     lv_obj_set_style_text_color(s_lbl_progress, lv_color_hex(OTA_CLR_LIME), 0);
     lv_obj_set_style_text_align(s_lbl_progress, LV_TEXT_ALIGN_CENTER, 0);
