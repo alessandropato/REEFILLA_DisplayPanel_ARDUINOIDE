@@ -53,14 +53,15 @@ static void ota_progress_cb(int cur, int total)
     if (pct == last_pct) return;
     last_pct = pct;
 
+    // Solo aggiornamento memoria: nessun flush SPI durante il download OTA.
+    // Durante esp_ota_write() le flash write bloccano il bus QSPI e possono
+    // interrompere i trasferimenti SPI del display → display corrotto.
+    // Il refresh avviene una volta sola dopo che httpUpdate termina e il
+    // WiFi è spento.
     lv_bar_set_value(s_bar_progress, pct, LV_ANIM_OFF);
     char buf[8];
     snprintf(buf, sizeof(buf), "%d%%", pct);
     lv_label_set_text(s_lbl_progress, buf);
-
-    // Aggiorna SOLO il display (non tutti i timer LVGL)
-    lv_tick_inc(5);
-    lv_refr_now(lv_disp_get_default());
 }
 
 // ── Parsing versione dal JSON {"version":"X.Y.Z"} ────────────────────────────
@@ -257,8 +258,15 @@ void ota_run()
     client2.setInsecure();
     const t_httpUpdate_return ret = httpUpdate.update(client2, OTA_BIN_URL);
 
+    // WiFi off prima di qualsiasi refresh display: evita conflitti SPI/flash
+    WiFi.disconnect(true);
+    WiFi.mode(WIFI_OFF);
+    delay(100);
+
     switch (ret) {
         case HTTP_UPDATE_OK:
+            lv_bar_set_value(s_bar_progress, 100, LV_ANIM_OFF);
+            lv_label_set_text(s_lbl_progress, "100%");
             set_status("Aggiornamento completato! Riavvio...", lv_color_hex(OTA_CLR_LIME));
             lv_pump(50);
             delay(1000);
@@ -268,8 +276,6 @@ void ota_run()
         case HTTP_UPDATE_FAILED:
             snprintf(msg, sizeof(msg), "Errore: %s", httpUpdate.getLastErrorString().c_str());
             set_status(msg, lv_color_hex(OTA_CLR_RED));
-            WiFi.disconnect(true);
-            WiFi.mode(WIFI_OFF);
             delay(2000);
             lv_pump(5);
             lv_obj_clean(lv_scr_act());
@@ -278,8 +284,6 @@ void ota_run()
         case HTTP_UPDATE_NO_UPDATES:
         default:
             set_status("Nessun aggiornamento disponibile", lv_color_hex(OTA_CLR_TEXT_DIM));
-            WiFi.disconnect(true);
-            WiFi.mode(WIFI_OFF);
             delay(1500);
             lv_pump(5);
             lv_obj_clean(lv_scr_act());
