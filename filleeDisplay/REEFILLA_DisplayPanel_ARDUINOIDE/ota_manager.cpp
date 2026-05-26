@@ -48,6 +48,11 @@ static void ota_progress_cb(int cur, int total)
 {
     if (!s_bar_progress || !s_lbl_progress) return;
     const int pct = (total > 0) ? (int)((long)cur * 100 / total) : 0;
+
+    static int last_pct = -1;
+    if (pct == last_pct) return;
+    last_pct = pct;
+
     lv_bar_set_value(s_bar_progress, pct, LV_ANIM_OFF);
     char buf[8];
     snprintf(buf, sizeof(buf), "%d%%", pct);
